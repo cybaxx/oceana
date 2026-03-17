@@ -13,7 +13,11 @@ export function initChatListeners() {
 	if (unsubWs) return;
 	unsubWs = onWsMessage((msg: WsServerMessage) => {
 		if (msg.type === 'new_message' && msg.message) {
-			const message = msg.message;
+			const message = {
+				...msg.message,
+				sender_username: msg.sender_username,
+				sender_is_bot: msg.sender_is_bot ?? false
+			};
 			// If viewing this conversation, append
 			if (get(activeConversationId) === message.conversation_id) {
 				activeMessages.update((msgs) => [...msgs, message]);

@@ -6,6 +6,9 @@
 
 	let posts = $state<PostWithAuthor[]>([]);
 	let newPost = $state('');
+	let pendingImageUrl = $state<string | null>(null);
+	let uploading = $state(false);
+	let fileInput: HTMLInputElement | undefined = $state();
 	let loading = $state(false);
 	let loadingMore = $state(false);
 	let hasMore = $state(true);
@@ -43,11 +46,35 @@
 		}
 	}
 
-	async function submitPost() {
-		if (!newPost.trim()) return;
+	async function handleImageSelect(e: Event) {
+		const target = e.target as HTMLInputElement;
+		const file = target.files?.[0];
+		if (!file) return;
+		uploading = true;
 		try {
-			await api.createPost(newPost.trim());
+			const { url } = await api.uploadImage(file);
+			pendingImageUrl = url;
+		} catch (e: any) {
+			error = e.message;
+		} finally {
+			uploading = false;
+			target.value = '';
+		}
+	}
+
+	function removeImage() {
+		pendingImageUrl = null;
+	}
+
+	async function submitPost() {
+		if (!newPost.trim() && !pendingImageUrl) return;
+		try {
+			const content = pendingImageUrl
+				? `${newPost.trim()} [img: ${pendingImageUrl}]`.trim()
+				: newPost.trim();
+			await api.createPost(content);
 			newPost = '';
+			pendingImageUrl = null;
 			await loadFeed();
 		} catch (e: any) {
 			error = e.message;
@@ -96,11 +123,32 @@
 				rows="3"
 				class="w-full resize-none rounded border border-[var(--terminal-border)] bg-[var(--ocean-950)] p-3 text-sm text-[var(--ocean-100)] focus:border-[var(--ocean-400)] focus:outline-none focus:shadow-[0_0_8px_var(--terminal-glow)]"
 			></textarea>
+			{#if pendingImageUrl}
+				<div class="relative mt-2 inline-block">
+					<img src={pendingImageUrl} alt="pending upload" class="max-h-32 rounded border border-[var(--terminal-border)]" />
+					<button
+						type="button"
+						onclick={removeImage}
+						class="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--terminal-red)] text-[10px] text-white hover:opacity-80"
+					>&times;</button>
+				</div>
+			{/if}
 			<div class="mt-2 flex items-center justify-between">
-				<span class="text-xs text-[var(--terminal-dim)]">{newPost.length}/10000</span>
+				<div class="flex items-center gap-2">
+					<input type="file" accept="image/*" class="hidden" bind:this={fileInput} onchange={handleImageSelect} />
+					<button
+						type="button"
+						disabled={uploading}
+						onclick={() => fileInput?.click()}
+						class="rounded border border-[var(--terminal-border)] px-2 py-1 text-xs text-[var(--terminal-dim)] transition-all hover:border-[var(--ocean-400)] hover:text-[var(--ocean-300)] disabled:opacity-50"
+					>
+						{uploading ? 'uploading...' : '+ image'}
+					</button>
+					<span class="text-xs text-[var(--terminal-dim)]">{newPost.length}/10000</span>
+				</div>
 				<button
 					type="submit"
-					disabled={!newPost.trim()}
+					disabled={!newPost.trim() && !pendingImageUrl}
 					class="rounded border border-[var(--ocean-400)] bg-transparent px-4 py-1.5 text-xs text-[var(--ocean-300)] transition-all hover:bg-[var(--ocean-400)]/10 hover:shadow-[0_0_8px_var(--ocean-400)] disabled:opacity-30 disabled:hover:shadow-none"
 				>
 					transmit
@@ -129,6 +177,11 @@
 						<a href="/users/{post.author_id}" class="text-xs font-semibold text-[var(--terminal-green)] no-underline hover:underline">
 							@{post.author_username}
 						</a>
+						{#if post.author_is_bot}
+							<span class="rounded border border-[var(--ocean-400)]/40 bg-[var(--ocean-400)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ocean-300)]">BOT</span>
+						{:else}
+							<span class="rounded border border-[var(--terminal-green)]/40 bg-[var(--terminal-green)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--terminal-green)]">HUMAN</span>
+						{/if}
 						{#if post.author_display_name}
 							<span class="text-xs text-[var(--terminal-dim)]">{post.author_display_name}</span>
 						{/if}

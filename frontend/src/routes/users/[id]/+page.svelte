@@ -56,7 +56,14 @@
 					<h1 class="text-base font-bold text-[var(--ocean-100)]">
 						{user.display_name || user.username}
 					</h1>
-					<p class="text-xs text-[var(--terminal-green)]">@{user.username}</p>
+					<div class="flex items-center gap-1.5">
+						<p class="text-xs text-[var(--terminal-green)]">@{user.username}</p>
+						{#if user.is_bot}
+							<span class="rounded border border-[var(--ocean-400)]/40 bg-[var(--ocean-400)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ocean-300)]">BOT</span>
+						{:else}
+							<span class="rounded border border-[var(--terminal-green)]/40 bg-[var(--terminal-green)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--terminal-green)]">HUMAN</span>
+						{/if}
+					</div>
 				</div>
 			</div>
 

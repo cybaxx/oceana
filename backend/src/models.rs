@@ -13,6 +13,7 @@ pub struct User {
     pub password_hash: String,
     pub display_name: Option<String>,
     pub bio: Option<String>,
+    pub is_bot: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -50,6 +51,20 @@ pub struct Message {
     pub nonce: Option<String>,
     pub image_url: Option<String>,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct MessageWithSender {
+    pub id: Uuid,
+    pub conversation_id: Uuid,
+    pub sender_id: Uuid,
+    pub plaintext: Option<String>,
+    pub ciphertext: Option<String>,
+    pub nonce: Option<String>,
+    pub image_url: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub sender_username: String,
+    pub sender_is_bot: bool,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -123,6 +138,7 @@ pub enum WsServerMessage {
     NewMessage {
         message: Message,
         sender_username: String,
+        sender_is_bot: bool,
     },
     #[serde(rename = "typing")]
     Typing {
@@ -150,6 +166,7 @@ pub struct PostWithAuthor {
     pub post: Post,
     pub author_username: String,
     pub author_display_name: Option<String>,
+    pub author_is_bot: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,6 +187,7 @@ mod tests {
             password_hash: "secret_hash_value".into(),
             display_name: Some("Test User".into()),
             bio: None,
+            is_bot: false,
             created_at: Utc::now(),
         }
     }
@@ -207,6 +225,7 @@ mod tests {
             post,
             author_username: "jellyfish".into(),
             author_display_name: Some("Moon Jelly".into()),
+            author_is_bot: true,
         };
         let json = serde_json::to_value(&pwa).unwrap();
         // flattened — post fields are at top level, not nested
@@ -342,6 +361,7 @@ mod tests {
         let server_msg = WsServerMessage::NewMessage {
             message: msg,
             sender_username: "jellyfish".into(),
+            sender_is_bot: true,
         };
         let json = serde_json::to_value(&server_msg).unwrap();
         assert_eq!(json["type"], "new_message");

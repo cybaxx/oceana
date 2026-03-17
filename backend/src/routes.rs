@@ -219,7 +219,8 @@ async fn get_feed(
     let rows = sqlx::query_as::<_, PostWithAuthorRow>(
         r#"
         SELECT p.id, p.author_id, p.content, p.parent_id, p.created_at,
-               u.username AS author_username, u.display_name AS author_display_name
+               u.username AS author_username, u.display_name AS author_display_name,
+               u.is_bot AS author_is_bot
         FROM posts p
         JOIN users u ON u.id = p.author_id
         WHERE (p.author_id IN (SELECT followed_id FROM follows WHERE follower_id = $1)
@@ -245,6 +246,7 @@ async fn get_feed(
         },
         author_username: r.author_username,
         author_display_name: r.author_display_name,
+        author_is_bot: r.author_is_bot,
     }).collect();
 
     Ok(Json(posts))
@@ -320,7 +322,7 @@ async fn get_messages(
     auth: AuthUser,
     Path(id): Path<Uuid>,
     Query(params): Query<MessagesQuery>,
-) -> Result<Json<Vec<Message>>, AppError> {
+) -> Result<Json<Vec<MessageWithSender>>, AppError> {
     // Verify user is a member
     let is_member = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2)"
@@ -337,11 +339,14 @@ async fn get_messages(
     let limit = params.limit.unwrap_or(50).min(100);
     let before = params.before.unwrap_or_else(|| chrono::Utc::now());
 
-    let messages = sqlx::query_as::<_, Message>(
+    let messages = sqlx::query_as::<_, MessageWithSender>(
         r#"
-        SELECT * FROM messages
-        WHERE conversation_id = $1 AND created_at < $2
-        ORDER BY created_at DESC
+        SELECT m.id, m.conversation_id, m.sender_id, m.plaintext, m.ciphertext, m.nonce, m.image_url, m.created_at,
+               u.username AS sender_username, u.is_bot AS sender_is_bot
+        FROM messages m
+        JOIN users u ON u.id = m.sender_id
+        WHERE m.conversation_id = $1 AND m.created_at < $2
+        ORDER BY m.created_at DESC
         LIMIT $3
         "#,
     )
@@ -414,10 +419,16 @@ async fn ws_handler(
     let user_id = claims.sub;
     let username = claims.username;
 
-    Ok(ws.on_upgrade(move |socket| handle_ws(socket, state, user_id, username)))
+    let is_bot = sqlx::query_scalar::<_, bool>("SELECT is_bot FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+
+    Ok(ws.on_upgrade(move |socket| handle_ws(socket, state, user_id, username, is_bot)))
 }
 
-async fn handle_ws(socket: WebSocket, state: AppState, user_id: Uuid, username: String) {
+async fn handle_ws(socket: WebSocket, state: AppState, user_id: Uuid, username: String, is_bot: bool) {
     let (mut ws_sink, mut ws_stream) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WsServerMessage>();
 
@@ -441,7 +452,7 @@ async fn handle_ws(socket: WebSocket, state: AppState, user_id: Uuid, username: 
                 if let Ok(client_msg) = serde_json::from_str::<WsClientMessage>(&text) {
                     match client_msg {
                         WsClientMessage::SendMessage { conversation_id, content, image_url } => {
-                            handle_send_message(&state, user_id, &username, conversation_id, content, image_url).await;
+                            handle_send_message(&state, user_id, &username, is_bot, conversation_id, content, image_url).await;
                         }
                         WsClientMessage::Typing { conversation_id } => {
                             handle_typing(&state, user_id, &username, conversation_id).await;
@@ -462,6 +473,7 @@ async fn handle_send_message(
     state: &AppState,
     sender_id: Uuid,
     sender_username: &str,
+    sender_is_bot: bool,
     conversation_id: Uuid,
     content: String,
     image_url: Option<String>,
@@ -511,6 +523,7 @@ async fn handle_send_message(
     let server_msg = WsServerMessage::NewMessage {
         message,
         sender_username: sender_username.to_string(),
+        sender_is_bot,
     };
 
     for member_id in members {
@@ -585,6 +598,7 @@ struct PostWithAuthorRow {
     created_at: chrono::DateTime<chrono::Utc>,
     author_username: String,
     author_display_name: Option<String>,
+    author_is_bot: bool,
 }
 
 #[cfg(test)]

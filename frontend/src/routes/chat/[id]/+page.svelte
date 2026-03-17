@@ -88,7 +88,17 @@
 						? 'bg-[var(--ocean-600)] text-white'
 						: 'border border-[var(--terminal-border)] bg-[var(--ocean-900)] text-[var(--terminal-text)]'}"
 				>
-					{#if msg.image_url}
+					{#if !isMe}
+					<div class="mb-1 flex items-center gap-1">
+						<span class="text-[10px] text-[var(--terminal-dim)]">{msg.sender_username ?? ''}</span>
+						{#if msg.sender_is_bot}
+							<span class="rounded border border-[var(--ocean-400)]/40 bg-[var(--ocean-400)]/10 px-1 py-0 text-[9px] font-medium text-[var(--ocean-300)]">BOT</span>
+						{:else}
+							<span class="rounded border border-[var(--terminal-green)]/40 bg-[var(--terminal-green)]/10 px-1 py-0 text-[9px] font-medium text-[var(--terminal-green)]">HUMAN</span>
+						{/if}
+					</div>
+				{/if}
+				{#if msg.image_url}
 					<img src={msg.image_url} alt="attachment" class="max-w-full rounded" />
 				{/if}
 				{#if msg.plaintext}

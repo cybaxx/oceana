@@ -4,6 +4,7 @@ export interface User {
 	email: string;
 	display_name: string | null;
 	bio: string | null;
+	is_bot: boolean;
 	created_at: string;
 }
 
@@ -18,6 +19,7 @@ export interface Post {
 export interface PostWithAuthor extends Post {
 	author_username: string;
 	author_display_name: string | null;
+	author_is_bot: boolean;
 }
 
 export interface AuthResponse {
@@ -42,12 +44,15 @@ export interface Message {
 	nonce: string | null;
 	image_url: string | null;
 	created_at: string;
+	sender_username?: string;
+	sender_is_bot?: boolean;
 }
 
 export interface WsServerMessage {
 	type: 'new_message' | 'typing' | 'error';
 	message?: Message;
 	sender_username?: string;
+	sender_is_bot?: boolean;
 	conversation_id?: string;
 	user_id?: string;
 	username?: string;

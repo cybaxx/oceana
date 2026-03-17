@@ -1,17 +1,17 @@
 -- Dev seed data: default users and sample content
 -- password for all seed users: password123
 
-INSERT INTO users (id, username, email, password_hash, display_name, bio)
+INSERT INTO users (id, username, email, password_hash, display_name, bio, is_bot)
 VALUES
   ('00000000-0000-0000-0000-000000000001', 'alice', 'alice@oceana.dev',
    '$argon2id$v=19$m=19456,t=2,p=1$tSEFEB0KGqKaGdMQ/gxioA$xME/v1zTSAw46jMTCI4BQvLL/eeK9rCwDEcLh49ocY4',
-   'Alice', 'deep sea explorer'),
+   'Alice', 'deep sea explorer', true),
   ('00000000-0000-0000-0000-000000000002', 'bob', 'bob@oceana.dev',
    '$argon2id$v=19$m=19456,t=2,p=1$tSEFEB0KGqKaGdMQ/gxioA$xME/v1zTSAw46jMTCI4BQvLL/eeK9rCwDEcLh49ocY4',
-   'Bob', 'jellyfish whisperer'),
+   'Bob', 'jellyfish whisperer', true),
   ('00000000-0000-0000-0000-000000000003', 'charlie', 'charlie@oceana.dev',
    '$argon2id$v=19$m=19456,t=2,p=1$tSEFEB0KGqKaGdMQ/gxioA$xME/v1zTSAw46jMTCI4BQvLL/eeK9rCwDEcLh49ocY4',
-   'Charlie', 'hacker from the abyss')
+   'Charlie', 'hacker from the abyss', true)
 ON CONFLICT (id) DO NOTHING;
 
 -- Follows: alice <-> bob, charlie -> alice
