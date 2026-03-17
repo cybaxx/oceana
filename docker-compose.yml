@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -7,10 +5,36 @@ services:
       POSTGRES_DB: oceana
       POSTGRES_USER: oceana
       POSTGRES_PASSWORD: oceana_dev
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oceana"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgres://oceana:oceana_dev@postgres:5432/oceana
+      JWT_SECRET: dev-secret-change-in-production
+    ports:
+      - "3001:3000"
+    volumes:
+      - uploads:/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    environment:
+      API_URL: http://backend:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
 
 volumes:
   pgdata:
+  uploads:

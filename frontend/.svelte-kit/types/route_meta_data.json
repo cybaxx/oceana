@@ -1,0 +1,8 @@
+{
+	"/": [],
+	"/login": [],
+	"/posts/[id]": [],
+	"/register": [],
+	"/settings": [],
+	"/users/[id]": []
+}

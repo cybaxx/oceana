@@ -1,9 +1,11 @@
 mod auth;
+mod chat;
 mod error;
 mod models;
 mod routes;
 
 use axum::Router;
+use chat::ConnectionManager;
 use sqlx::postgres::PgPoolOptions;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -12,6 +14,7 @@ use tower_http::trace::TraceLayer;
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub jwt_secret: String,
+    pub connections: ConnectionManager,
 }
 
 #[tokio::main]
@@ -30,13 +33,28 @@ async fn main() {
         .await
         .expect("Failed to connect to database");
 
-    // Run migrations
-    sqlx::query(include_str!("../migrations/001_initial.sql"))
-        .execute(&db)
-        .await
-        .ok(); // ignore if already applied
+    // Run migrations (execute each statement individually since sqlx doesn't support multi-statement)
+    for migration_sql in [
+        include_str!("../migrations/001_initial.sql"),
+        include_str!("../migrations/002_chat.sql"),
+        include_str!("../migrations/003_attachments.sql"),
+    ] {
+        for statement in migration_sql.split(';') {
+            let stmt = statement.trim();
+            if !stmt.is_empty() {
+                sqlx::query(stmt).execute(&db).await.ok();
+            }
+        }
+    }
 
-    let state = AppState { db, jwt_secret };
+    let state = AppState {
+        db,
+        jwt_secret,
+        connections: ConnectionManager::new(),
+    };
+
+    // Ensure uploads directory exists
+    tokio::fs::create_dir_all("/uploads").await.expect("Failed to create /uploads directory");
 
     let app = Router::new()
         .nest("/api/v1", routes::router())

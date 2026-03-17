@@ -551,6 +551,69 @@ These lessons correspond to planned phases in `docs/architecture.md`. They're he
 
 ---
 
+## Module 9: Frontend (SvelteKit)
+
+### Lesson 9.1 — SvelteKit Project Structure & SSR
+
+**Concept:** How SvelteKit combines server-side rendering with client-side interactivity.
+
+**Files:** `frontend/src/routes/+layout.svelte`, `frontend/src/hooks.server.ts`
+
+**Key Points:**
+- `+layout.svelte` wraps all pages — ideal for nav bars and shared UI
+- `+page.svelte` files define routes based on the filesystem (`/login/+page.svelte` → `/login`)
+- `hooks.server.ts` runs on the server for every request — used here to proxy `/api/*` to the backend
+- SSR means code runs on both server and client — `localStorage` and other browser APIs must be guarded with `import { browser } from '$app/environment'`
+
+**Gotcha learned:** `process.env` doesn't work in SvelteKit. Use `$env/dynamic/private` for server-side env vars.
+
+---
+
+### Lesson 9.2 — Svelte Stores for Auth State
+
+**Concept:** Managing authentication state across components with reactive stores.
+
+**Files:** `frontend/src/lib/stores/auth.ts`
+
+**Key Points:**
+- `writable()` creates a reactive store that components can subscribe to
+- The store is backed by `localStorage` for persistence across page reloads
+- All `localStorage` calls are guarded with `if (browser)` for SSR safety
+- Components access state with `$auth` (auto-subscription syntax)
+- The store exposes `login()`, `logout()`, `updateUser()` methods
+
+---
+
+### Lesson 9.3 — API Client Pattern
+
+**Concept:** A typed fetch wrapper that automatically handles auth headers and errors.
+
+**Files:** `frontend/src/lib/api.ts`, `frontend/src/lib/types.ts`
+
+**Key Points:**
+- A single `request()` function handles all API calls
+- JWT token is read from the auth store and attached as `Authorization: Bearer` header
+- Non-2xx responses are parsed for error messages and thrown as exceptions
+- TypeScript interfaces in `types.ts` mirror the Rust backend models
+- Each API method is a thin wrapper: `login: (email, password) => request('POST', '/auth/login', { email, password })`
+
+---
+
+### Lesson 9.4 — API Proxying in SvelteKit
+
+**Concept:** Routing frontend API calls to a separate backend service.
+
+**Files:** `frontend/src/hooks.server.ts`
+
+**Key Points:**
+- Vite's built-in proxy doesn't work with SvelteKit (SvelteKit intercepts all routes first)
+- `hooks.server.ts` intercepts requests matching `/api/*` and forwards them to the backend
+- Inside Docker, the backend is at `http://backend:3000`; locally it's `http://localhost:3001`
+- The `API_URL` env var (via `$env/dynamic/private`) controls the target
+- Only `Authorization` and `Content-Type` headers are forwarded (avoids `Host` header conflicts)
+
+---
+
 ## Appendix: Concept Map
 
 ```

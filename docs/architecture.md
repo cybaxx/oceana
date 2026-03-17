@@ -344,9 +344,9 @@ GET    /api/v1/users/:id
 GET    /api/v1/users/:id/posts
     Returns: paginated list of user's posts
 
-PUT    /api/v1/users/me/profile
-    Body: { display_name?, bio?, avatar_url?, banner_url?, location?, website? }
-    Returns: { profile }
+PUT    /api/v1/profile
+    Body: { display_name?, bio? }
+    Returns: { user }
 
 GET    /api/v1/users/:id/followers
     Returns: paginated list of followers
@@ -824,67 +824,67 @@ RETURN [n IN nodes(path) | n.username] AS chain, length(path) AS degrees
 
 ### Docker Compose (Development)
 
-```yaml
-version: '3.8'
+Current setup — one command runs everything:
 
+```yaml
 services:
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: oceana
       POSTGRES_USER: oceana
-      POSTGRES_PASSWORD: dev_password
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: oceana_dev
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oceana"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
 
-  neo4j:
-    image: neo4j:5-community
+  backend:
+    build: ./backend
     environment:
-      NEO4J_AUTH: neo4j/dev_password
-      NEO4J_PLUGINS: '["graph-data-science"]'
+      DATABASE_URL: postgres://oceana:oceana_dev@postgres:5432/oceana
+      JWT_SECRET: dev-secret-change-in-production
     ports:
-      - "7474:7474"   # browser
-      - "7687:7687"   # bolt
-    volumes:
-      - neo4jdata:/data
+      - "3001:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  minio:
-    image: minio/minio
-    command: server /data --console-address ":9001"
+  frontend:
+    build: ./frontend
     environment:
-      MINIO_ROOT_USER: oceana
-      MINIO_ROOT_PASSWORD: dev_password
+      API_URL: http://backend:3000
     ports:
-      - "9000:9000"   # API
-      - "9001:9001"   # console
-    volumes:
-      - miniodata:/data
+      - "5173:5173"
+    depends_on:
+      - backend
 
 volumes:
   pgdata:
-  neo4jdata:
-  miniodata:
 ```
+
+**Future additions** (as features are built):
+- Neo4j for graph queries and recommendations
+- Redis for caching, sessions, and chat pub/sub
+- MinIO for media/object storage
 
 ### Project Structure
 
-**Current (Phase 1 — flat modules):**
+**Current (Phase 2 — full-stack MVP):**
 
 ```
 oceana/
 ├── docs/
 │   ├── architecture.md          # this document
-│   └── dev-pilot.md             # implementation progress tracker
+│   ├── dev-pilot.md             # implementation progress tracker
+│   └── lessons.md               # structured learning curriculum
 ├── backend/
 │   ├── Cargo.toml
-│   ├── .env                     # DATABASE_URL, JWT_SECRET
+│   ├── Dockerfile               # multi-stage Rust build
+│   ├── .env                     # DATABASE_URL, JWT_SECRET (local dev)
 │   ├── src/
 │   │   ├── main.rs              # entry point, server startup, migration
 │   │   ├── error.rs             # AppError enum → JSON responses
@@ -893,7 +893,29 @@ oceana/
 │   │   └── routes.rs            # all route handlers
 │   └── migrations/
 │       └── 001_initial.sql
-├── docker-compose.yml           # PostgreSQL 16
+├── frontend/
+│   ├── Dockerfile               # Node 22 alpine, Vite dev server
+│   ├── package.json
+│   ├── svelte.config.js
+│   ├── vite.config.ts
+│   └── src/
+│       ├── app.html
+│       ├── app.css              # dark ocean terminal theme
+│       ├── hooks.server.ts      # API proxy to backend
+│       ├── lib/
+│       │   ├── api.ts           # typed fetch wrapper with JWT
+│       │   ├── types.ts         # User, Post, PostWithAuthor, AuthResponse
+│       │   └── stores/
+│       │       └── auth.ts      # Svelte store (localStorage, SSR-safe)
+│       └── routes/
+│           ├── +layout.svelte   # nav bar
+│           ├── +page.svelte     # feed
+│           ├── login/+page.svelte
+│           ├── register/+page.svelte
+│           ├── settings/+page.svelte
+│           ├── users/[id]/+page.svelte
+│           └── posts/[id]/+page.svelte
+├── docker-compose.yml           # postgres + backend + frontend
 ├── test.sh                      # curl smoke test
 └── .gitignore
 ```
@@ -958,7 +980,7 @@ oceana/
 - [x] Axum hello world with health check endpoint
 - [x] Database migrations (inline SQL; upgrade to `sqlx-cli` later)
 - [x] User registration and login (Argon2id + JWT)
-- [ ] Basic SvelteKit frontend with login/register pages
+- [x] SvelteKit frontend with login/register, feed, profiles, settings
 
 ### Phase 2: Core Social Features
 
@@ -968,7 +990,7 @@ oceana/
 - [x] Chronological feed (pull-based from PostgreSQL)
 - [ ] Post replies and threading
 - [ ] Reactions
-- [ ] Frontend pages for feed, profiles, post detail
+- [x] Frontend pages for feed, profiles, post detail
 
 ### Phase 3: Media
 

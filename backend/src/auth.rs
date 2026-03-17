@@ -91,3 +91,65 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, AppError> {
         .verify_password(password.as_bytes(), &parsed)
         .is_ok())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SECRET: &str = "test-secret-key";
+
+    #[test]
+    fn create_and_verify_token() {
+        let user_id = Uuid::new_v4();
+        let token = create_token(user_id, "testuser", SECRET).unwrap();
+        let claims = verify_token(&token, SECRET).unwrap();
+        assert_eq!(claims.sub, user_id);
+        assert_eq!(claims.username, "testuser");
+    }
+
+    #[test]
+    fn verify_token_wrong_secret_fails() {
+        let token = create_token(Uuid::new_v4(), "user", SECRET).unwrap();
+        assert!(verify_token(&token, "wrong-secret").is_err());
+    }
+
+    #[test]
+    fn verify_token_garbage_fails() {
+        assert!(verify_token("not.a.jwt", SECRET).is_err());
+    }
+
+    #[test]
+    fn token_contains_expiry() {
+        let token = create_token(Uuid::new_v4(), "user", SECRET).unwrap();
+        let claims = verify_token(&token, SECRET).unwrap();
+        assert!(claims.exp > claims.iat);
+        assert_eq!(claims.exp - claims.iat, 3600);
+    }
+
+    #[test]
+    fn hash_and_verify_password() {
+        let hash = hash_password("mypassword123").unwrap();
+        assert!(verify_password("mypassword123", &hash).unwrap());
+    }
+
+    #[test]
+    fn wrong_password_fails_verification() {
+        let hash = hash_password("correct-password").unwrap();
+        assert!(!verify_password("wrong-password", &hash).unwrap());
+    }
+
+    #[test]
+    fn same_password_produces_different_hashes() {
+        let h1 = hash_password("same-password").unwrap();
+        let h2 = hash_password("same-password").unwrap();
+        assert_ne!(h1, h2); // different salts
+        // but both verify
+        assert!(verify_password("same-password", &h1).unwrap());
+        assert!(verify_password("same-password", &h2).unwrap());
+    }
+
+    #[test]
+    fn invalid_hash_string_returns_error() {
+        assert!(verify_password("anything", "not-a-valid-hash").is_err());
+    }
+}
