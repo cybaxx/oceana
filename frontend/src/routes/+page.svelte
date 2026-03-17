@@ -54,6 +54,14 @@
 		}
 	}
 
+	function extractImage(content: string): { text: string; imageUrl: string | null } {
+		const match = content.match(/\[img:\s*(\/api\/v1\/uploads\/[^\]]+)\]/);
+		if (match) {
+			return { text: content.replace(match[0], '').trim(), imageUrl: match[1] };
+		}
+		return { text: content, imageUrl: null };
+	}
+
 	function timeAgo(dateStr: string): string {
 		const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
 		if (seconds < 60) return 'now';
@@ -112,6 +120,7 @@
 	{:else}
 		<div class="space-y-3">
 			{#each posts as post (post.id)}
+				{@const parsed = extractImage(post.content)}
 				<div class="group rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-4 transition-all hover:border-[var(--ocean-400)]/40 hover:shadow-[0_0_12px_var(--terminal-glow)]">
 					<div class="mb-2 flex items-center gap-2">
 						<div class="flex h-7 w-7 items-center justify-center rounded border border-[var(--terminal-border)] bg-[var(--ocean-800)] text-xs font-bold text-[var(--ocean-300)]">
@@ -125,7 +134,12 @@
 						{/if}
 						<span class="ml-auto text-xs text-[var(--terminal-dim)]">{timeAgo(post.created_at)}</span>
 					</div>
-					<p class="whitespace-pre-wrap text-sm leading-relaxed text-[var(--ocean-100)]">{post.content}</p>
+					{#if parsed.text}
+						<p class="whitespace-pre-wrap text-sm leading-relaxed text-[var(--ocean-100)]">{parsed.text}</p>
+					{/if}
+					{#if parsed.imageUrl}
+						<img src={parsed.imageUrl} alt="post attachment" class="mt-2 max-w-full rounded-lg border border-[var(--terminal-border)]" />
+					{/if}
 				</div>
 			{/each}
 		</div>
