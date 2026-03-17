@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: oceana
       POSTGRES_PASSWORD: oceana_dev
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
       - ./docker/postgres:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U oceana"]
@@ -22,7 +22,7 @@ services:
     ports:
       - "3001:3000"
     volumes:
-      - uploads:/uploads
+      - ./data/uploads:/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,6 +36,4 @@ services:
     depends_on:
       - backend
 
-volumes:
-  pgdata:
-  uploads:
+volumes: {}

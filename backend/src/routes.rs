@@ -25,6 +25,9 @@ pub fn router() -> Router<AppState> {
         .route("/posts", post(create_post))
         .route("/posts/:id", get(get_post))
         .route("/posts/:id", delete(delete_post))
+        .route("/posts/:id/react", post(react_to_post).delete(unreact_to_post))
+        .route("/posts/:id/reactions", get(get_reactions))
+        .route("/posts/:id/replies", get(get_replies))
         // Feed
         .route("/feed", get(get_feed))
         // Chat
@@ -205,6 +208,103 @@ async fn delete_post(
     Ok(Json(serde_json::json!({ "status": "deleted" })))
 }
 
+// --- Reactions ---
+
+async fn react_to_post(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<ReactRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let body_kind = validate_emoji(&body.kind)
+        .map_err(AppError::BadRequest)?;
+    sqlx::query(
+        "INSERT INTO reactions (user_id, post_id, kind) VALUES ($1, $2, $3) ON CONFLICT (user_id, post_id) DO UPDATE SET kind = $3"
+    )
+    .bind(auth.user_id)
+    .bind(id)
+    .bind(&body_kind)
+    .execute(&state.db)
+    .await?;
+    Ok(Json(serde_json::json!({ "status": "ok", "kind": body_kind })))
+}
+
+async fn unreact_to_post(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    sqlx::query("DELETE FROM reactions WHERE user_id = $1 AND post_id = $2")
+        .bind(auth.user_id)
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+    Ok(Json(serde_json::json!({ "status": "removed" })))
+}
+
+async fn get_reactions(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let reaction_counts: Vec<ReactionCountRow> = sqlx::query_as(
+        "SELECT kind AS emoji, COUNT(*) AS count FROM reactions WHERE post_id = $1 GROUP BY kind"
+    ).bind(id).fetch_all(&state.db).await?;
+    let user_reaction: Option<String> = sqlx::query_scalar("SELECT kind FROM reactions WHERE post_id = $1 AND user_id = $2")
+        .bind(id).bind(auth.user_id).fetch_optional(&state.db).await?;
+    let reactions: Vec<serde_json::Value> = reaction_counts.into_iter()
+        .map(|r| serde_json::json!({ "emoji": r.emoji, "count": r.count }))
+        .collect();
+    Ok(Json(serde_json::json!({ "reactions": reactions, "user_reaction": user_reaction })))
+}
+
+// --- Replies ---
+
+async fn get_replies(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<PostWithAuthor>>, AppError> {
+    let rows = sqlx::query_as::<_, PostWithAuthorRow>(
+        r#"
+        SELECT p.id, p.author_id, p.content, p.parent_id, p.created_at,
+               u.username AS author_username, u.display_name AS author_display_name,
+               u.is_bot AS author_is_bot,
+               COALESCE((SELECT json_agg(json_build_object('emoji', sub.kind, 'count', sub.cnt))
+                 FROM (SELECT kind, COUNT(*) AS cnt FROM reactions WHERE post_id = p.id GROUP BY kind) sub
+               ), '[]'::json) AS reaction_counts,
+               (SELECT kind FROM reactions WHERE post_id = p.id AND user_id = $1) AS user_reaction,
+               0::bigint AS reply_count
+        FROM posts p
+        JOIN users u ON u.id = p.author_id
+        WHERE p.parent_id = $2
+        ORDER BY p.created_at ASC
+        "#,
+    )
+    .bind(auth.user_id)
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let posts = rows.into_iter().map(|r| PostWithAuthor {
+        post: Post {
+            id: r.id,
+            author_id: r.author_id,
+            content: r.content,
+            parent_id: r.parent_id,
+            created_at: r.created_at,
+        },
+        author_username: r.author_username,
+        author_display_name: r.author_display_name,
+        author_is_bot: r.author_is_bot,
+        reaction_counts: r.reaction_counts,
+        user_reaction: r.user_reaction,
+        reply_count: r.reply_count,
+    }).collect();
+
+    Ok(Json(posts))
+}
+
 // --- Feed ---
 
 async fn get_feed(
@@ -220,11 +320,17 @@ async fn get_feed(
         r#"
         SELECT p.id, p.author_id, p.content, p.parent_id, p.created_at,
                u.username AS author_username, u.display_name AS author_display_name,
-               u.is_bot AS author_is_bot
+               u.is_bot AS author_is_bot,
+               COALESCE((SELECT json_agg(json_build_object('emoji', sub.kind, 'count', sub.cnt))
+                 FROM (SELECT kind, COUNT(*) AS cnt FROM reactions WHERE post_id = p.id GROUP BY kind) sub
+               ), '[]'::json) AS reaction_counts,
+               (SELECT kind FROM reactions WHERE post_id = p.id AND user_id = $1) AS user_reaction,
+               (SELECT COUNT(*) FROM posts r WHERE r.parent_id = p.id) AS reply_count
         FROM posts p
         JOIN users u ON u.id = p.author_id
         WHERE (p.author_id IN (SELECT followed_id FROM follows WHERE follower_id = $1)
                OR p.author_id = $1)
+          AND p.parent_id IS NULL
           AND p.created_at < $2
         ORDER BY p.created_at DESC
         LIMIT $3
@@ -247,6 +353,9 @@ async fn get_feed(
         author_username: r.author_username,
         author_display_name: r.author_display_name,
         author_is_bot: r.author_is_bot,
+        reaction_counts: r.reaction_counts,
+        user_reaction: r.user_reaction,
+        reply_count: r.reply_count,
     }).collect();
 
     Ok(Json(posts))
@@ -558,6 +667,22 @@ async fn handle_typing(
     }
 }
 
+// --- Emoji validation helper (for testing) ---
+
+fn validate_emoji(kind: &str) -> Result<String, String> {
+    let trimmed = kind.trim();
+    if trimmed.is_empty() {
+        return Err("kind must be a single emoji".into());
+    }
+    if trimmed.chars().count() > 2 {
+        return Err("kind must be a single emoji".into());
+    }
+    if trimmed.chars().any(|c| c.is_ascii_alphanumeric()) {
+        return Err("kind must be a single emoji".into());
+    }
+    Ok(trimmed.to_string())
+}
+
 // --- Upload validation helpers (for testing) ---
 
 fn validate_image_content_type(content_type: &str) -> Result<&'static str, String> {
@@ -599,6 +724,15 @@ struct PostWithAuthorRow {
     author_username: String,
     author_display_name: Option<String>,
     author_is_bot: bool,
+    reaction_counts: serde_json::Value,
+    user_reaction: Option<String>,
+    reply_count: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct ReactionCountRow {
+    emoji: String,
+    count: i64,
 }
 
 #[cfg(test)]
@@ -715,5 +849,73 @@ mod tests {
     #[test]
     fn full_path_uses_last_extension() {
         assert_eq!(content_type_for_extension("/uploads/abc.png"), "image/png");
+    }
+
+    // --- validate_emoji ---
+
+    #[test]
+    fn emoji_accepts_fire() {
+        assert_eq!(validate_emoji("🔥").unwrap(), "🔥");
+    }
+
+    #[test]
+    fn emoji_accepts_brain() {
+        assert_eq!(validate_emoji("🧠").unwrap(), "🧠");
+    }
+
+    #[test]
+    fn emoji_accepts_wave() {
+        assert_eq!(validate_emoji("🌊").unwrap(), "🌊");
+    }
+
+    #[test]
+    fn emoji_accepts_skull() {
+        assert_eq!(validate_emoji("💀").unwrap(), "💀");
+    }
+
+    #[test]
+    fn emoji_accepts_with_whitespace() {
+        assert_eq!(validate_emoji(" 🔥 ").unwrap(), "🔥");
+    }
+
+    #[test]
+    fn emoji_accepts_flag_sequence() {
+        // Flag emoji are 2 chars (regional indicators)
+        assert!(validate_emoji("🇺🇸").is_ok());
+    }
+
+    #[test]
+    fn emoji_rejects_empty() {
+        assert!(validate_emoji("").is_err());
+    }
+
+    #[test]
+    fn emoji_rejects_whitespace_only() {
+        assert!(validate_emoji("   ").is_err());
+    }
+
+    #[test]
+    fn emoji_rejects_plain_text() {
+        assert!(validate_emoji("like").is_err());
+    }
+
+    #[test]
+    fn emoji_rejects_alphanumeric() {
+        assert!(validate_emoji("a").is_err());
+    }
+
+    #[test]
+    fn emoji_rejects_number() {
+        assert!(validate_emoji("1").is_err());
+    }
+
+    #[test]
+    fn emoji_rejects_mixed_emoji_and_text() {
+        assert!(validate_emoji("🔥a").is_err());
+    }
+
+    #[test]
+    fn emoji_rejects_too_many_chars() {
+        assert!(validate_emoji("🔥🧠💀").is_err());
     }
 }

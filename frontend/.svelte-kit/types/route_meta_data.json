@@ -1,5 +1,7 @@
 {
 	"/": [],
+	"/chat": [],
+	"/chat/[id]": [],
 	"/login": [],
 	"/posts/[id]": [],
 	"/register": [],

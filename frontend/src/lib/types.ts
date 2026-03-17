@@ -20,6 +20,9 @@ export interface PostWithAuthor extends Post {
 	author_username: string;
 	author_display_name: string | null;
 	author_is_bot: boolean;
+	reaction_counts: { emoji: string; count: number }[];
+	user_reaction: string | null;
+	reply_count: number;
 }
 
 export interface AuthResponse {

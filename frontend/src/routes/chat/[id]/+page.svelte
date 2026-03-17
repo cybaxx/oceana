@@ -5,6 +5,7 @@
 	import { activeMessages, loadMessages, initChatListeners } from '$lib/stores/chat';
 	import { connectWs, sendWsMessage } from '$lib/ws';
 	import { api } from '$lib/api';
+	import Markdown from '$lib/components/Markdown.svelte';
 
 	let input = $state('');
 	let messagesDiv: HTMLDivElement | undefined = $state();
@@ -102,7 +103,7 @@
 					<img src={msg.image_url} alt="attachment" class="max-w-full rounded" />
 				{/if}
 				{#if msg.plaintext}
-					<p class="break-words">{msg.plaintext}</p>
+					<div class="break-words"><Markdown content={msg.plaintext} /></div>
 				{/if}
 					<span class="mt-1 block text-right text-[10px] opacity-60">
 						{formatTime(msg.created_at)}

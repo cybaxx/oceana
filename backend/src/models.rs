@@ -104,6 +104,23 @@ pub struct UpdateProfileRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ReactRequest {
+    pub kind: String,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct ReactionCounts {
+    pub reactions: Vec<ReactionCount>,
+    pub user_reaction: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReactionCount {
+    pub emoji: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct CreateConversationRequest {
     pub participant_ids: Vec<Uuid>,
 }
@@ -167,6 +184,9 @@ pub struct PostWithAuthor {
     pub author_username: String,
     pub author_display_name: Option<String>,
     pub author_is_bot: bool,
+    pub reaction_counts: serde_json::Value,
+    pub user_reaction: Option<String>,
+    pub reply_count: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -226,6 +246,8 @@ mod tests {
             author_username: "jellyfish".into(),
             author_display_name: Some("Moon Jelly".into()),
             author_is_bot: true,
+            reaction_counts: serde_json::json!([]),
+            user_reaction: None,
         };
         let json = serde_json::to_value(&pwa).unwrap();
         // flattened — post fields are at top level, not nested
@@ -233,6 +255,60 @@ mod tests {
         assert_eq!(json["author_username"], "jellyfish");
         assert_eq!(json["author_display_name"], "Moon Jelly");
         assert!(json.get("post").is_none()); // not nested
+        assert_eq!(json["reaction_counts"], serde_json::json!([]));
+        assert!(json["user_reaction"].is_null());
+    }
+
+    #[test]
+    fn post_with_author_reaction_counts_with_data() {
+        let post = Post {
+            id: Uuid::new_v4(),
+            author_id: Uuid::new_v4(),
+            content: "test".into(),
+            parent_id: None,
+            created_at: Utc::now(),
+        };
+        let pwa = PostWithAuthor {
+            post,
+            author_username: "alice".into(),
+            author_display_name: None,
+            author_is_bot: false,
+            reaction_counts: serde_json::json!([
+                {"emoji": "🔥", "count": 3},
+                {"emoji": "🧠", "count": 1}
+            ]),
+            user_reaction: Some("🔥".into()),
+        };
+        let json = serde_json::to_value(&pwa).unwrap();
+        let counts = json["reaction_counts"].as_array().unwrap();
+        assert_eq!(counts.len(), 2);
+        assert_eq!(counts[0]["emoji"], "🔥");
+        assert_eq!(counts[0]["count"], 3);
+        assert_eq!(counts[1]["emoji"], "🧠");
+        assert_eq!(counts[1]["count"], 1);
+        assert_eq!(json["user_reaction"], "🔥");
+    }
+
+    #[test]
+    fn post_with_author_no_likes_yikes_fields() {
+        let post = Post {
+            id: Uuid::new_v4(),
+            author_id: Uuid::new_v4(),
+            content: "test".into(),
+            parent_id: None,
+            created_at: Utc::now(),
+        };
+        let pwa = PostWithAuthor {
+            post,
+            author_username: "bob".into(),
+            author_display_name: None,
+            author_is_bot: true,
+            reaction_counts: serde_json::json!([]),
+            user_reaction: None,
+        };
+        let json = serde_json::to_value(&pwa).unwrap();
+        assert!(json.get("likes").is_none());
+        assert!(json.get("yikes").is_none());
     }
 
     #[test]

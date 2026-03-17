@@ -7,7 +7,22 @@
     "imports": [
       "_root.js",
       "_environment.js",
-      "_internal.js"
+      "_internal.js",
+      "_shared-server.js"
+    ]
+  },
+  "_Markdown.B6JarIt8.css": {
+    "file": "_app/immutable/assets/Markdown.B6JarIt8.css",
+    "src": "_Markdown.B6JarIt8.css"
+  },
+  "_Markdown.js": {
+    "file": "chunks/Markdown.js",
+    "name": "Markdown",
+    "imports": [
+      "_index2.js"
+    ],
+    "css": [
+      "_app/immutable/assets/Markdown.B6JarIt8.css"
     ]
   },
   "_auth.js": {
@@ -15,6 +30,14 @@
     "name": "auth",
     "imports": [
       "_index.js"
+    ]
+  },
+  "_chat.js": {
+    "file": "chunks/chat.js",
+    "name": "chat",
+    "imports": [
+      "_index.js",
+      "_auth.js"
     ]
   },
   "_environment.js": {
@@ -48,7 +71,11 @@
     "name": "internal",
     "imports": [
       "_root.js",
-      "_environment.js"
+      "_environment.js",
+      "_shared-server.js"
+    ],
+    "dynamicImports": [
+      "src/hooks.server.ts"
     ]
   },
   "_root.js": {
@@ -57,6 +84,10 @@
     "imports": [
       "_index2.js"
     ]
+  },
+  "_shared-server.js": {
+    "file": "chunks/shared-server.js",
+    "name": "shared-server"
   },
   "_shared.js": {
     "file": "chunks/shared.js",
@@ -115,7 +146,18 @@
       "_exports.js",
       "_utils.js",
       "_index.js",
+      "_shared-server.js",
       "_internal.js"
+    ]
+  },
+  "src/hooks.server.ts": {
+    "file": "entries/hooks.server.js",
+    "name": "entries/hooks.server",
+    "src": "src/hooks.server.ts",
+    "isEntry": true,
+    "isDynamicEntry": true,
+    "imports": [
+      "_shared-server.js"
     ]
   },
   "src/routes/+layout.svelte": {
@@ -128,7 +170,7 @@
       "_auth.js"
     ],
     "css": [
-      "_app/immutable/assets/_layout.B3AWiJZ0.css"
+      "_app/immutable/assets/_layout.BzbfmrJr.css"
     ]
   },
   "src/routes/+page.svelte": {
@@ -138,7 +180,35 @@
     "isEntry": true,
     "imports": [
       "_index2.js",
-      "_auth.js"
+      "_auth.js",
+      "_Markdown.js"
+    ]
+  },
+  "src/routes/chat/+page.svelte": {
+    "file": "entries/pages/chat/_page.svelte.js",
+    "name": "entries/pages/chat/_page.svelte",
+    "src": "src/routes/chat/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index2.js",
+      "_auth.js",
+      "_chat.js"
+    ]
+  },
+  "src/routes/chat/[id]/+page.svelte": {
+    "file": "entries/pages/chat/_id_/_page.svelte.js",
+    "name": "entries/pages/chat/_id_/_page.svelte",
+    "src": "src/routes/chat/[id]/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index2.js",
+      "_exports.js",
+      "_utils.js",
+      "_root.js",
+      "_state.svelte.js",
+      "_auth.js",
+      "_chat.js",
+      "_Markdown.js"
     ]
   },
   "src/routes/login/+page.svelte": {

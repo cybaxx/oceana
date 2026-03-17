@@ -43,9 +43,12 @@ export const api = {
 	unfollow: (id: string) => request('DELETE', `/users/${id}/follow`),
 
 	// Posts
-	createPost: (content: string) => request('POST', '/posts', { content }),
+	createPost: (content: string, parent_id?: string) => request('POST', '/posts', { content, parent_id }),
+	getReplies: (id: string) => request('GET', `/posts/${id}/replies`),
 	getPost: (id: string) => request('GET', `/posts/${id}`),
 	deletePost: (id: string) => request('DELETE', `/posts/${id}`),
+	reactToPost: (id: string, kind: 'like' | 'yikes') => request('POST', `/posts/${id}/react`, { kind }),
+	unreactToPost: (id: string) => request('DELETE', `/posts/${id}/react`),
 
 	// Feed
 	getFeed: (before?: string, limit?: number) => {
