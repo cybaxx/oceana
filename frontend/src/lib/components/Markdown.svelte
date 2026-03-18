@@ -19,12 +19,80 @@
 		gfm: true
 	});
 
+	interface Embed {
+		type: 'youtube' | 'soundcloud' | 'spotify';
+		html: string;
+	}
+
+	function extractEmbeds(text: string): { cleaned: string; embeds: Embed[] } {
+		const embeds: Embed[] = [];
+		const lines = text.split('\n');
+		const cleaned = lines
+			.map((line) => {
+				const trimmed = line.trim();
+				let embed: Embed | null = null;
+
+				// YouTube
+				let match = trimmed.match(
+					/^(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{11})(?:[&?].*)?$/
+				);
+				if (match) {
+					embed = {
+						type: 'youtube',
+						html: `<div class="embed-container embed-video"><iframe src="https://www.youtube.com/embed/${match[1]}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`
+					};
+				}
+
+				// SoundCloud
+				if (!embed && /^https?:\/\/soundcloud\.com\/[\w-]+\/[\w-]+/.test(trimmed)) {
+					embed = {
+						type: 'soundcloud',
+						html: `<div class="embed-container embed-audio"><iframe src="https://w.soundcloud.com/player/?url=${encodeURIComponent(trimmed)}&color=%23176B87&auto_play=false" frameborder="0" allow="autoplay" loading="lazy"></iframe></div>`
+					};
+				}
+
+				// Spotify
+				if (!embed) {
+					match = trimmed.match(
+						/^https?:\/\/open\.spotify\.com\/(track|album|playlist)\/([\w]+)(?:\?.*)?$/
+					);
+					if (match) {
+						embed = {
+							type: 'spotify',
+							html: `<div class="embed-container embed-audio"><iframe src="https://open.spotify.com/embed/${match[1]}/${match[2]}" frameborder="0" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`
+						};
+					}
+				}
+
+				if (embed) {
+					const idx = embeds.length;
+					embeds.push(embed);
+					return `<div data-embed="${idx}"></div>`;
+				}
+				return line;
+			})
+			.join('\n');
+
+		return { cleaned, embeds };
+	}
+
 	const html = $derived.by(() => {
-		const raw = marked.parse(content) as string;
+		const { cleaned, embeds } = extractEmbeds(content);
+		const raw = marked.parse(cleaned) as string;
+		let sanitized: string;
 		if (browser) {
-			return DOMPurify.sanitize(raw);
+			sanitized = DOMPurify.sanitize(raw, {
+				ADD_TAGS: ['iframe'],
+				ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'loading', 'src', 'data-embed']
+			});
+		} else {
+			sanitized = raw;
 		}
-		return raw;
+		// Replace placeholders with embed HTML
+		return sanitized.replace(/<div data-embed="(\d+)"><\/div>/g, (_, idx) => {
+			const embed = embeds[parseInt(idx)];
+			return embed ? embed.html : '';
+		});
 	});
 </script>
 
@@ -118,5 +186,32 @@
 	}
 	.markdown-content :global(th) {
 		background: var(--ocean-900);
+	}
+	/* Embed styles */
+	.markdown-content :global(.embed-container) {
+		margin: 0.5em 0;
+		border-radius: 8px;
+		overflow: hidden;
+	}
+	.markdown-content :global(.embed-video) {
+		position: relative;
+		padding-bottom: 56.25%;
+		height: 0;
+	}
+	.markdown-content :global(.embed-video iframe) {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		border: none;
+	}
+	.markdown-content :global(.embed-audio) {
+		height: 166px;
+	}
+	.markdown-content :global(.embed-audio iframe) {
+		width: 100%;
+		height: 100%;
+		border: none;
 	}
 </style>

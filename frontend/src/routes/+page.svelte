@@ -137,9 +137,13 @@
 		return { text: content, imageUrl: null };
 	}
 
-	const EMOJI_QUICK = ['🔥', '🧠', '🫧', '⚡', '💀', '🌊'];
+	const EMOJI_GRID = [
+		'🔥', '🧠', '💀', '⚡', '🌊', '🫧',
+		'❤️', '😂', '😮', '😢', '😡', '🎉',
+		'👀', '🙏', '💯', '🤔', '🫡', '👏',
+		'✨', '🤯', '🥶', '🫠', '🤝', '🎵',
+	];
 	let pickerOpenFor = $state<string | null>(null);
-	let customEmojiInput = $state('');
 
 	let expandedComments = $state<Record<string, boolean>>({});
 	let replies = $state<Record<string, PostWithAuthor[]>>({});
@@ -355,7 +359,39 @@
 						</div>
 					{/if}
 					<div class="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--terminal-border)]/50 pt-2">
-						{#each post.reaction_counts.filter(r => r.count > 0) as reaction (reaction.emoji)}
+						<button
+							onclick={() => toggleReaction(post, '👍')}
+							class="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-all {post.user_reaction === '👍'
+								? 'border-[var(--terminal-green)] bg-[var(--terminal-green)]/15 text-[var(--terminal-green)]'
+								: 'border-[var(--terminal-border)] text-[var(--terminal-dim)] hover:border-[var(--terminal-green)]/60'}"
+						>
+							<span class="text-[10px]">▲</span>{#if (post.reaction_counts.find(r => r.emoji === '👍')?.count || 0) > 0}<span>{post.reaction_counts.find(r => r.emoji === '👍')?.count}</span>{/if}
+						</button>
+						<button
+							onclick={() => toggleReaction(post, '😬')}
+							class="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-all {post.user_reaction === '😬'
+								? 'border-[var(--terminal-red)] bg-[var(--terminal-red)]/15 text-[var(--terminal-red)]'
+								: 'border-[var(--terminal-border)] text-[var(--terminal-dim)] hover:border-[var(--terminal-red)]/60'}"
+						>
+							<span class="text-[10px]">▼</span>{#if (post.reaction_counts.find(r => r.emoji === '😬')?.count || 0) > 0}<span>{post.reaction_counts.find(r => r.emoji === '😬')?.count}</span>{/if}
+						</button>
+						<div class="relative">
+							<button
+								onclick={() => pickerOpenFor = pickerOpenFor === post.id ? null : post.id}
+								class="flex items-center gap-0.5 rounded-full border border-[var(--terminal-border)] px-2 py-0.5 text-xs text-[var(--terminal-dim)] transition-all hover:border-[var(--ocean-400)]/60 hover:text-[var(--ocean-300)]"
+							>😀<span class="text-[10px]">+</span></button>
+							{#if pickerOpenFor === post.id}
+								<div class="absolute bottom-full left-0 z-10 mb-1 grid grid-cols-6 gap-0.5 rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-1.5 shadow-lg">
+									{#each EMOJI_GRID as emoji}
+										<button
+											onclick={() => toggleReaction(post, emoji)}
+											class="flex h-7 w-7 items-center justify-center rounded text-sm transition-all hover:bg-[var(--ocean-400)]/15 {post.user_reaction === emoji ? 'bg-[var(--ocean-400)]/20' : ''}"
+										>{emoji}</button>
+									{/each}
+								</div>
+							{/if}
+						</div>
+						{#each post.reaction_counts.filter(r => r.count > 0 && r.emoji !== '👍' && r.emoji !== '😬') as reaction (reaction.emoji)}
 							<button
 								onclick={() => toggleReaction(post, reaction.emoji)}
 								class="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-all {post.user_reaction === reaction.emoji
@@ -366,33 +402,6 @@
 								<span>{reaction.count}</span>
 							</button>
 						{/each}
-						<div class="relative">
-							<button
-								onclick={() => pickerOpenFor = pickerOpenFor === post.id ? null : post.id}
-								class="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--terminal-border)] text-xs text-[var(--terminal-dim)] transition-all hover:border-[var(--ocean-400)]/60 hover:text-[var(--ocean-300)]"
-							>+</button>
-							{#if pickerOpenFor === post.id}
-								<div class="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-1 rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-1.5 shadow-lg">
-									<div class="flex gap-1">
-										{#each EMOJI_QUICK as emoji}
-											<button
-												onclick={() => toggleReaction(post, emoji)}
-												class="flex h-7 w-7 items-center justify-center rounded text-sm transition-all hover:bg-[var(--ocean-400)]/15 {post.user_reaction === emoji ? 'bg-[var(--ocean-400)]/20' : ''}"
-											>{emoji}</button>
-										{/each}
-									</div>
-									<form class="flex gap-1" onsubmit={(e) => { e.preventDefault(); if (customEmojiInput.trim()) { toggleReaction(post, customEmojiInput.trim()); customEmojiInput = ''; } }}>
-										<input
-											type="text"
-											bind:value={customEmojiInput}
-											placeholder="any emoji"
-											class="w-20 rounded border border-[var(--terminal-border)] bg-[var(--ocean-950)] px-1.5 py-0.5 text-xs text-[var(--ocean-100)] focus:border-[var(--ocean-400)] focus:outline-none"
-										/>
-										<button type="submit" class="rounded border border-[var(--terminal-border)] px-1.5 py-0.5 text-xs text-[var(--terminal-dim)] hover:border-[var(--ocean-400)] hover:text-[var(--ocean-300)]">go</button>
-									</form>
-								</div>
-							{/if}
-						</div>
 					</div>
 					<!-- Comments toggle -->
 					<button

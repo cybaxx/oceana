@@ -52,7 +52,7 @@ export const api = {
 	getReplies: (id: string) => request('GET', `/posts/${id}/replies`),
 	getPost: (id: string) => request('GET', `/posts/${id}`),
 	deletePost: (id: string) => request('DELETE', `/posts/${id}`),
-	reactToPost: (id: string, kind: 'like' | 'yikes') => request('POST', `/posts/${id}/react`, { kind }),
+	reactToPost: (id: string, kind: string) => request('POST', `/posts/${id}/react`, { kind }),
 	unreactToPost: (id: string) => request('DELETE', `/posts/${id}/react`),
 
 	// Feed
