@@ -33,6 +33,12 @@ pub fn router() -> Router<AppState> {
         // Chat
         .route("/chats", post(create_conversation).get(list_conversations))
         .route("/chats/:id/messages", get(get_messages))
+        // Signal keys
+        .route("/keys/bundle", put(upload_key_bundle))
+        .route("/keys/bundle/:user_id", get(get_key_bundle))
+        .route("/keys/count", get(get_key_count))
+        // Conversation members
+        .route("/chats/:id/members", get(get_conversation_members))
         // Uploads
         .route("/upload", post(upload_image))
         .route("/uploads/:filename", get(serve_upload))
@@ -170,11 +176,12 @@ async fn create_post(
         return Err(AppError::BadRequest("Post content must be 1-10000 characters".into()));
     }
     let post = sqlx::query_as::<_, Post>(
-        "INSERT INTO posts (author_id, content, parent_id) VALUES ($1, $2, $3) RETURNING *"
+        "INSERT INTO posts (author_id, content, parent_id, signature) VALUES ($1, $2, $3, $4) RETURNING *"
     )
     .bind(auth.user_id)
     .bind(&body.content)
     .bind(body.parent_id)
+    .bind(&body.signature)
     .fetch_one(&state.db)
     .await?;
     Ok(Json(post))
@@ -267,9 +274,10 @@ async fn get_replies(
 ) -> Result<Json<Vec<PostWithAuthor>>, AppError> {
     let rows = sqlx::query_as::<_, PostWithAuthorRow>(
         r#"
-        SELECT p.id, p.author_id, p.content, p.parent_id, p.created_at,
+        SELECT p.id, p.author_id, p.content, p.parent_id, p.signature, p.created_at,
                u.username AS author_username, u.display_name AS author_display_name,
                u.is_bot AS author_is_bot,
+               u.signing_key AS author_signing_key,
                COALESCE((SELECT json_agg(json_build_object('emoji', sub.kind, 'count', sub.cnt))
                  FROM (SELECT kind, COUNT(*) AS cnt FROM reactions WHERE post_id = p.id GROUP BY kind) sub
                ), '[]'::json) AS reaction_counts,
@@ -292,6 +300,7 @@ async fn get_replies(
             author_id: r.author_id,
             content: r.content,
             parent_id: r.parent_id,
+            signature: r.signature,
             created_at: r.created_at,
         },
         author_username: r.author_username,
@@ -300,6 +309,7 @@ async fn get_replies(
         reaction_counts: r.reaction_counts,
         user_reaction: r.user_reaction,
         reply_count: r.reply_count,
+        author_signing_key: r.author_signing_key,
     }).collect();
 
     Ok(Json(posts))
@@ -318,9 +328,10 @@ async fn get_feed(
     // Posts from people you follow, plus your own, newest first
     let rows = sqlx::query_as::<_, PostWithAuthorRow>(
         r#"
-        SELECT p.id, p.author_id, p.content, p.parent_id, p.created_at,
+        SELECT p.id, p.author_id, p.content, p.parent_id, p.signature, p.created_at,
                u.username AS author_username, u.display_name AS author_display_name,
                u.is_bot AS author_is_bot,
+               u.signing_key AS author_signing_key,
                COALESCE((SELECT json_agg(json_build_object('emoji', sub.kind, 'count', sub.cnt))
                  FROM (SELECT kind, COUNT(*) AS cnt FROM reactions WHERE post_id = p.id GROUP BY kind) sub
                ), '[]'::json) AS reaction_counts,
@@ -348,6 +359,7 @@ async fn get_feed(
             author_id: r.author_id,
             content: r.content,
             parent_id: r.parent_id,
+            signature: r.signature,
             created_at: r.created_at,
         },
         author_username: r.author_username,
@@ -356,6 +368,7 @@ async fn get_feed(
         reaction_counts: r.reaction_counts,
         user_reaction: r.user_reaction,
         reply_count: r.reply_count,
+        author_signing_key: r.author_signing_key,
     }).collect();
 
     Ok(Json(posts))
@@ -450,7 +463,7 @@ async fn get_messages(
 
     let messages = sqlx::query_as::<_, MessageWithSender>(
         r#"
-        SELECT m.id, m.conversation_id, m.sender_id, m.plaintext, m.ciphertext, m.nonce, m.image_url, m.created_at,
+        SELECT m.id, m.conversation_id, m.sender_id, m.plaintext, m.ciphertext, m.nonce, m.message_type, m.image_url, m.created_at,
                u.username AS sender_username, u.is_bot AS sender_is_bot
         FROM messages m
         JOIN users u ON u.id = m.sender_id
@@ -560,8 +573,8 @@ async fn handle_ws(socket: WebSocket, state: AppState, user_id: Uuid, username: 
             WsMsg::Text(text) => {
                 if let Ok(client_msg) = serde_json::from_str::<WsClientMessage>(&text) {
                     match client_msg {
-                        WsClientMessage::SendMessage { conversation_id, content, image_url } => {
-                            handle_send_message(&state, user_id, &username, is_bot, conversation_id, content, image_url).await;
+                        WsClientMessage::SendMessage { conversation_id, content, image_url, ciphertext, nonce, message_type } => {
+                            handle_send_message(&state, user_id, &username, is_bot, conversation_id, content, image_url, ciphertext, nonce, message_type).await;
                         }
                         WsClientMessage::Typing { conversation_id } => {
                             handle_typing(&state, user_id, &username, conversation_id).await;
@@ -584,8 +597,11 @@ async fn handle_send_message(
     sender_username: &str,
     sender_is_bot: bool,
     conversation_id: Uuid,
-    content: String,
+    content: Option<String>,
     image_url: Option<String>,
+    ciphertext: Option<String>,
+    nonce: Option<String>,
+    message_type: Option<i32>,
 ) {
     // Verify membership
     let is_member = sqlx::query_scalar::<_, bool>(
@@ -601,13 +617,16 @@ async fn handle_send_message(
         return;
     }
 
-    // Store message
+    // Store message — encrypted or plaintext
     let message = sqlx::query_as::<_, Message>(
-        "INSERT INTO messages (conversation_id, sender_id, plaintext, image_url) VALUES ($1, $2, $3, $4) RETURNING *"
+        "INSERT INTO messages (conversation_id, sender_id, plaintext, ciphertext, nonce, message_type, image_url) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *"
     )
     .bind(conversation_id)
     .bind(sender_id)
     .bind(&content)
+    .bind(&ciphertext)
+    .bind(&nonce)
+    .bind(message_type)
     .bind(&image_url)
     .fetch_one(&state.db)
     .await;
@@ -720,10 +739,12 @@ struct PostWithAuthorRow {
     author_id: Uuid,
     content: String,
     parent_id: Option<Uuid>,
+    signature: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     author_username: String,
     author_display_name: Option<String>,
     author_is_bot: bool,
+    author_signing_key: Option<String>,
     reaction_counts: serde_json::Value,
     user_reaction: Option<String>,
     reply_count: i64,
@@ -733,6 +754,111 @@ struct PostWithAuthorRow {
 struct ReactionCountRow {
     emoji: String,
     count: i64,
+}
+
+// --- Signal Protocol Key Management ---
+
+async fn upload_key_bundle(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Json(body): Json<UploadKeyBundleRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    // Upsert user's identity key, signed prekey, and optional signing key
+    sqlx::query(
+        "UPDATE users SET identity_key = $1, signed_prekey = $2, signed_prekey_signature = $3, signed_prekey_id = $4, signing_key = COALESCE($6, signing_key) WHERE id = $5"
+    )
+    .bind(&body.identity_key)
+    .bind(&body.signed_prekey)
+    .bind(&body.signed_prekey_signature)
+    .bind(body.signed_prekey_id)
+    .bind(auth.user_id)
+    .bind(&body.signing_key)
+    .execute(&state.db)
+    .await?;
+
+    // Insert one-time prekeys
+    for opk in &body.one_time_prekeys {
+        sqlx::query(
+            "INSERT INTO prekeys (user_id, key_id, public_key) VALUES ($1, $2, $3) ON CONFLICT (user_id, key_id) DO UPDATE SET public_key = $3"
+        )
+        .bind(auth.user_id)
+        .bind(opk.key_id)
+        .bind(&opk.public_key)
+        .execute(&state.db)
+        .await?;
+    }
+
+    Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
+async fn get_key_bundle(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(user_id): Path<Uuid>,
+) -> Result<Json<PreKeyBundleResponse>, AppError> {
+    let row = sqlx::query_as::<_, (String, String, String, i32)>(
+        "SELECT identity_key, signed_prekey, signed_prekey_signature, signed_prekey_id FROM users WHERE id = $1 AND identity_key IS NOT NULL"
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("No key bundle for user".into()))?;
+
+    // Atomically pop one OPK
+    let opk = sqlx::query_as::<_, (i32, String)>(
+        "DELETE FROM prekeys WHERE id = (SELECT id FROM prekeys WHERE user_id = $1 LIMIT 1) RETURNING key_id, public_key"
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    Ok(Json(PreKeyBundleResponse {
+        user_id,
+        identity_key: row.0,
+        signed_prekey: row.1,
+        signed_prekey_signature: row.2,
+        signed_prekey_id: row.3,
+        one_time_prekey: opk.map(|(key_id, public_key)| OneTimePreKeyResponse { key_id, public_key }),
+    }))
+}
+
+async fn get_key_count(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<Json<PreKeyCountResponse>, AppError> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM prekeys WHERE user_id = $1")
+        .bind(auth.user_id)
+        .fetch_one(&state.db)
+        .await?;
+    Ok(Json(PreKeyCountResponse { count }))
+}
+
+async fn get_conversation_members(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<Uuid>>, AppError> {
+    // Verify user is a member
+    let is_member = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2)"
+    )
+    .bind(id)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    if !is_member {
+        return Err(AppError::NotFound("Conversation not found".into()));
+    }
+
+    let members: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT user_id FROM conversation_members WHERE conversation_id = $1"
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(members))
 }
 
 #[cfg(test)]

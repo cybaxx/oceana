@@ -23,6 +23,7 @@ pub struct Post {
     pub author_id: Uuid,
     pub content: String,
     pub parent_id: Option<Uuid>,
+    pub signature: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -49,6 +50,7 @@ pub struct Message {
     pub plaintext: Option<String>,
     pub ciphertext: Option<String>,
     pub nonce: Option<String>,
+    pub message_type: Option<i32>,
     pub image_url: Option<String>,
     pub created_at: DateTime<Utc>,
 }
@@ -61,6 +63,7 @@ pub struct MessageWithSender {
     pub plaintext: Option<String>,
     pub ciphertext: Option<String>,
     pub nonce: Option<String>,
+    pub message_type: Option<i32>,
     pub image_url: Option<String>,
     pub created_at: DateTime<Utc>,
     pub sender_username: String,
@@ -95,6 +98,46 @@ pub struct LoginRequest {
 pub struct CreatePostRequest {
     pub content: String,
     pub parent_id: Option<Uuid>,
+    pub signature: Option<String>,
+}
+
+// --- Signal Protocol key types ---
+
+#[derive(Debug, Deserialize)]
+pub struct OneTimePreKey {
+    pub key_id: i32,
+    pub public_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UploadKeyBundleRequest {
+    pub identity_key: String,
+    pub signed_prekey: String,
+    pub signed_prekey_signature: String,
+    pub signed_prekey_id: i32,
+    pub one_time_prekeys: Vec<OneTimePreKey>,
+    pub signing_key: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OneTimePreKeyResponse {
+    pub key_id: i32,
+    pub public_key: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PreKeyBundleResponse {
+    pub user_id: Uuid,
+    pub identity_key: String,
+    pub signed_prekey: String,
+    pub signed_prekey_signature: String,
+    pub signed_prekey_id: i32,
+    pub one_time_prekey: Option<OneTimePreKeyResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PreKeyCountResponse {
+    pub count: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,8 +182,11 @@ pub enum WsClientMessage {
     #[serde(rename = "send_message")]
     SendMessage {
         conversation_id: Uuid,
-        content: String,
+        content: Option<String>,
         image_url: Option<String>,
+        ciphertext: Option<String>,
+        nonce: Option<String>,
+        message_type: Option<i32>,
     },
     #[serde(rename = "typing")]
     Typing {
@@ -187,6 +233,7 @@ pub struct PostWithAuthor {
     pub reaction_counts: serde_json::Value,
     pub user_reaction: Option<String>,
     pub reply_count: i64,
+    pub author_signing_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -239,6 +286,7 @@ mod tests {
             author_id: Uuid::new_v4(),
             content: "hello world".into(),
             parent_id: None,
+            signature: None,
             created_at: Utc::now(),
         };
         let pwa = PostWithAuthor {
@@ -248,6 +296,8 @@ mod tests {
             author_is_bot: true,
             reaction_counts: serde_json::json!([]),
             user_reaction: None,
+            reply_count: 0,
+            author_signing_key: None,
         };
         let json = serde_json::to_value(&pwa).unwrap();
         // flattened — post fields are at top level, not nested
@@ -266,6 +316,7 @@ mod tests {
             author_id: Uuid::new_v4(),
             content: "test".into(),
             parent_id: None,
+            signature: None,
             created_at: Utc::now(),
         };
         let pwa = PostWithAuthor {
@@ -278,6 +329,8 @@ mod tests {
                 {"emoji": "🧠", "count": 1}
             ]),
             user_reaction: Some("🔥".into()),
+            reply_count: 0,
+            author_signing_key: None,
         };
         let json = serde_json::to_value(&pwa).unwrap();
         let counts = json["reaction_counts"].as_array().unwrap();
@@ -296,6 +349,7 @@ mod tests {
             author_id: Uuid::new_v4(),
             content: "test".into(),
             parent_id: None,
+            signature: None,
             created_at: Utc::now(),
         };
         let pwa = PostWithAuthor {
@@ -305,6 +359,8 @@ mod tests {
             author_is_bot: true,
             reaction_counts: serde_json::json!([]),
             user_reaction: None,
+            reply_count: 0,
+            author_signing_key: None,
         };
         let json = serde_json::to_value(&pwa).unwrap();
         assert!(json.get("likes").is_none());
@@ -361,6 +417,7 @@ mod tests {
             plaintext: Some("hello".into()),
             ciphertext: None,
             nonce: None,
+            message_type: None,
             image_url: None,
             created_at: Utc::now(),
         }
@@ -398,7 +455,7 @@ mod tests {
         let msg: WsClientMessage = serde_json::from_str(json).unwrap();
         match msg {
             WsClientMessage::SendMessage { content, image_url, .. } => {
-                assert_eq!(content, "hi");
+                assert_eq!(content, Some("hi".into()));
                 assert_eq!(image_url, Some("/uploads/img.png".into()));
             }
             _ => panic!("expected SendMessage"),
@@ -411,7 +468,7 @@ mod tests {
         let msg: WsClientMessage = serde_json::from_str(json).unwrap();
         match msg {
             WsClientMessage::SendMessage { content, image_url, .. } => {
-                assert_eq!(content, "hello");
+                assert_eq!(content, Some("hello".into()));
                 assert!(image_url.is_none());
             }
             _ => panic!("expected SendMessage"),
@@ -425,6 +482,20 @@ mod tests {
         match msg {
             WsClientMessage::SendMessage { image_url, .. } => {
                 assert!(image_url.is_none());
+            }
+            _ => panic!("expected SendMessage"),
+        }
+    }
+
+    #[test]
+    fn ws_send_message_deserializes_encrypted() {
+        let json = r#"{"type":"send_message","conversation_id":"550e8400-e29b-41d4-a716-446655440000","ciphertext":"abc123","message_type":3}"#;
+        let msg: WsClientMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            WsClientMessage::SendMessage { content, ciphertext, message_type, .. } => {
+                assert!(content.is_none());
+                assert_eq!(ciphertext, Some("abc123".into()));
+                assert_eq!(message_type, Some(3));
             }
             _ => panic!("expected SendMessage"),
         }

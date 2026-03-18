@@ -1,7 +1,7 @@
 import { f as derived } from "./index2.js";
 import { Marked } from "marked";
 import hljs from "highlight.js";
-import DOMPurify from "dompurify";
+import "dompurify";
 function html(value) {
   var html2 = String(value ?? "");
   var open = "<!---->";
@@ -21,7 +21,10 @@ function Markdown($$renderer, $$props) {
       breaks: true,
       gfm: true
     });
-    const html$1 = derived(() => DOMPurify.sanitize(marked.parse(content)));
+    const html$1 = derived(() => {
+      const raw = marked.parse(content);
+      return raw;
+    });
     $$renderer2.push(`<div class="markdown-content svelte-z28whr">${html(html$1())}</div>`);
   });
 }

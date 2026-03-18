@@ -11,9 +11,9 @@
       "_shared-server.js"
     ]
   },
-  "_Markdown.B6JarIt8.css": {
-    "file": "_app/immutable/assets/Markdown.B6JarIt8.css",
-    "src": "_Markdown.B6JarIt8.css"
+  "_Markdown.DH6Awn9V.css": {
+    "file": "_app/immutable/assets/Markdown.DH6Awn9V.css",
+    "src": "_Markdown.DH6Awn9V.css"
   },
   "_Markdown.js": {
     "file": "chunks/Markdown.js",
@@ -22,7 +22,7 @@
       "_index2.js"
     ],
     "css": [
-      "_app/immutable/assets/Markdown.B6JarIt8.css"
+      "_app/immutable/assets/Markdown.DH6Awn9V.css"
     ]
   },
   "_auth.js": {
@@ -170,7 +170,7 @@
       "_auth.js"
     ],
     "css": [
-      "_app/immutable/assets/_layout.BzbfmrJr.css"
+      "_app/immutable/assets/_layout.Bir5i1X4.css"
     ]
   },
   "src/routes/+page.svelte": {
@@ -182,6 +182,19 @@
       "_index2.js",
       "_auth.js",
       "_Markdown.js"
+    ]
+  },
+  "src/routes/about/+page.svelte": {
+    "file": "entries/pages/about/_page.svelte.js",
+    "name": "entries/pages/about/_page.svelte",
+    "src": "src/routes/about/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index2.js",
+      "_Markdown.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.DgmUVPXk.css"
     ]
   },
   "src/routes/chat/+page.svelte": {

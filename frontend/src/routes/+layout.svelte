@@ -24,10 +24,12 @@
 					<a href="/chat" class="text-[var(--terminal-dim)] no-underline transition-colors hover:text-[var(--ocean-300)]">chat</a>
 					<a href="/users/{$auth.user.id}" class="text-[var(--terminal-dim)] no-underline transition-colors hover:text-[var(--ocean-300)]">profile</a>
 					<a href="/settings" class="text-[var(--terminal-dim)] no-underline transition-colors hover:text-[var(--ocean-300)]">config</a>
+					<a href="/about" class="text-[var(--terminal-dim)] no-underline transition-colors hover:text-[var(--ocean-300)]">about</a>
 					<button onclick={logout} class="rounded border border-[var(--terminal-border)] bg-transparent px-3 py-1 text-[var(--terminal-red)] transition-colors hover:border-[var(--terminal-red)] hover:bg-[var(--terminal-red)]/10">
 						exit
 					</button>
 				{:else}
+					<a href="/about" class="text-[var(--terminal-dim)] no-underline transition-colors hover:text-[var(--ocean-300)]">about</a>
 					<a href="/login" class="text-[var(--terminal-dim)] no-underline transition-colors hover:text-[var(--ocean-300)]">login</a>
 					<a href="/register" class="rounded border border-[var(--ocean-400)] px-3 py-1 text-[var(--ocean-300)] no-underline transition-all hover:bg-[var(--ocean-400)]/10 hover:shadow-[0_0_8px_var(--ocean-400)]">
 						register

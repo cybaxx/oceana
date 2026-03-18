@@ -2078,6 +2078,7 @@ function to_style(value, styles) {
 }
 const BLOCK_OPEN = `<!--${HYDRATION_START}-->`;
 const BLOCK_CLOSE = `<!--${HYDRATION_END}-->`;
+const EMPTY_COMMENT = `<!---->`;
 let controller = null;
 function abort() {
   controller?.abort(STALE_REACTION);
@@ -2249,10 +2250,10 @@ class Renderer {
    * @param {(renderer: Renderer) => void} fn
    */
   head(fn) {
-    const head = new Renderer(this.global, this);
-    head.type = "head";
-    this.#out.push(head);
-    head.child(fn);
+    const head2 = new Renderer(this.global, this);
+    head2.type = "head";
+    this.#out.push(head2);
+    head2.child(fn);
   }
   /**
    * @param {Array<Promise<void>>} blockers
@@ -2447,7 +2448,7 @@ class Renderer {
    */
   option(attrs, body, css_hash, classes, styles, flags, is_rich) {
     this.#out.push(`<option${attributes(attrs, css_hash, classes, styles, flags)}`);
-    const close = (renderer, value, { head, body: body2 }) => {
+    const close = (renderer, value, { head: head2, body: body2 }) => {
       if (has_own_property.call(attrs, "value")) {
         value = attrs.value;
       }
@@ -2455,8 +2456,8 @@ class Renderer {
         renderer.#out.push(' selected=""');
       }
       renderer.#out.push(`>${body2}${is_rich ? "<!>" : ""}</option>`);
-      if (head) {
-        renderer.head((child) => child.push(head));
+      if (head2) {
+        renderer.head((child) => child.push(head2));
       }
     };
     if (typeof body === "function") {
@@ -2481,8 +2482,8 @@ class Renderer {
    */
   title(fn) {
     const path = this.get_path();
-    const close = (head) => {
-      this.global.set_title(head, path);
+    const close = (head2) => {
+      this.global.set_title(head2, path);
     };
     this.child((renderer) => {
       const r = new Renderer(renderer.global, renderer);
@@ -2808,13 +2809,13 @@ class Renderer {
     for (const cleanup of renderer.#collect_on_destroy()) {
       cleanup();
     }
-    let head = content.head + renderer.global.get_title();
+    let head2 = content.head + renderer.global.get_title();
     let body = content.body;
     for (const { hash, code } of renderer.global.css) {
-      head += `<style id="${hash}">${code}</style>`;
+      head2 += `<style id="${hash}">${code}</style>`;
     }
     return {
-      head,
+      head: head2,
       body,
       hashes: {
         script: renderer.global.csp.script_hashes
@@ -2928,6 +2929,13 @@ function render(component, options = {}) {
     options
   );
 }
+function head(hash, renderer, fn) {
+  renderer.head((renderer2) => {
+    renderer2.push(`<!--${hash}-->`);
+    renderer2.child(fn);
+    renderer2.push(EMPTY_COMMENT);
+  });
+}
 function attributes(attrs, css_hash, classes, styles, flags = 0) {
   if (styles) {
     attrs.style = to_style(attrs.style, styles);
@@ -3017,67 +3025,68 @@ function derived(fn) {
   };
 }
 export {
-  is_passive_event as $,
-  current_batch as A,
+  array_from as $,
+  pause_effect as A,
   BOUNDARY_EFFECT as B,
   COMMENT_NODE as C,
-  move_effect as D,
-  defer_effect as E,
-  set_active_effect as F,
-  set_active_reaction as G,
+  current_batch as D,
+  move_effect as E,
+  defer_effect as F,
+  set_active_effect as G,
   HYDRATION_ERROR as H,
-  set_component_context as I,
-  Batch as J,
-  handle_error as K,
-  active_reaction as L,
-  component_context as M,
-  internal_set as N,
-  destroy_effect as O,
-  invoke_error_boundary as P,
-  svelte_boundary_reset_onerror as Q,
-  HYDRATION_START_FAILED as R,
-  EFFECT_TRANSPARENT as S,
-  EFFECT_PRESERVED as T,
-  define_property as U,
-  init_operations as V,
-  get_first_child as W,
-  hydration_failed as X,
-  clear_text_content as Y,
-  component_root as Z,
-  array_from as _,
+  set_active_reaction as I,
+  set_component_context as J,
+  Batch as K,
+  handle_error as L,
+  active_reaction as M,
+  component_context as N,
+  internal_set as O,
+  destroy_effect as P,
+  invoke_error_boundary as Q,
+  svelte_boundary_reset_onerror as R,
+  HYDRATION_START_FAILED as S,
+  EFFECT_TRANSPARENT as T,
+  EFFECT_PRESERVED as U,
+  define_property as V,
+  init_operations as W,
+  get_first_child as X,
+  hydration_failed as Y,
+  clear_text_content as Z,
+  component_root as _,
   attr as a,
-  push$1 as a0,
-  pop$1 as a1,
-  set as a2,
-  LEGACY_PROPS as a3,
-  flushSync as a4,
-  mutable_source as a5,
-  render as a6,
-  setContext as a7,
-  safe_not_equal as a8,
+  is_passive_event as a0,
+  push$1 as a1,
+  pop$1 as a2,
+  set as a3,
+  LEGACY_PROPS as a4,
+  flushSync as a5,
+  mutable_source as a6,
+  render as a7,
+  setContext as a8,
+  safe_not_equal as a9,
   stringify as b,
   ensure_array_like as c,
   attr_class as d,
   escape_html as e,
   derived as f,
   getContext as g,
-  HYDRATION_END as h,
-  HYDRATION_START as i,
-  HYDRATION_START_ELSE as j,
-  get_next_sibling as k,
-  effect_tracking as l,
-  get as m,
+  head as h,
+  HYDRATION_END as i,
+  HYDRATION_START as j,
+  HYDRATION_START_ELSE as k,
+  get_next_sibling as l,
+  effect_tracking as m,
   noop as n,
-  source as o,
-  untrack as p,
-  increment as q,
+  get as o,
+  source as p,
+  untrack as q,
   render_effect as r,
   store_get as s,
-  queue_micro_task as t,
+  increment as t,
   unsubscribe_stores as u,
-  active_effect as v,
-  block as w,
-  branch as x,
-  create_text as y,
-  pause_effect as z
+  queue_micro_task as v,
+  active_effect as w,
+  block as x,
+  branch as y,
+  create_text as z
 };

@@ -13,6 +13,7 @@ export interface Post {
 	author_id: string;
 	content: string;
 	parent_id: string | null;
+	signature?: string | null;
 	created_at: string;
 }
 
@@ -23,6 +24,8 @@ export interface PostWithAuthor extends Post {
 	reaction_counts: { emoji: string; count: number }[];
 	user_reaction: string | null;
 	reply_count: number;
+	signature?: string | null;
+	author_signing_key?: string | null;
 }
 
 export interface AuthResponse {
@@ -45,10 +48,20 @@ export interface Message {
 	plaintext: string | null;
 	ciphertext: string | null;
 	nonce: string | null;
+	message_type?: number | null;
 	image_url: string | null;
 	created_at: string;
 	sender_username?: string;
 	sender_is_bot?: boolean;
+}
+
+export interface PreKeyBundleResponse {
+	user_id: string;
+	identity_key: string;
+	signed_prekey: string;
+	signed_prekey_signature: string;
+	signed_prekey_id: number;
+	one_time_prekey: { key_id: number; public_key: string } | null;
 }
 
 export interface WsServerMessage {

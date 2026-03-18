@@ -4,6 +4,7 @@
 	import type { PostWithAuthor } from '$lib/types';
 	import { onMount } from 'svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
+	import { initCrypto, getCryptoStore, signContent, verifySignature } from '$lib/crypto';
 
 	let posts = $state<PostWithAuthor[]>([]);
 	let newPost = $state('');
@@ -14,9 +15,16 @@
 	let loadingMore = $state(false);
 	let hasMore = $state(true);
 	let error = $state('');
+	let signatureStatus = $state<Record<string, 'verified' | 'unverified' | 'checking' | null>>({});
+	let signing = $state(false);
+	let cryptoReady = $state(false);
 
 	onMount(async () => {
 		if (!$auth.token) return;
+		if ($auth.user) {
+			await initCrypto($auth.user.id).catch((e: unknown) => console.error('Crypto init failed:', e));
+			cryptoReady = !!getCryptoStore();
+		}
 		await loadFeed();
 	});
 
@@ -73,7 +81,19 @@
 			const content = pendingImageUrl
 				? `${newPost.trim()} [img: ${pendingImageUrl}]`.trim()
 				: newPost.trim();
-			await api.createPost(content);
+			let signature: string | undefined;
+			const store = getCryptoStore();
+			if (store) {
+				try {
+					signing = true;
+					signature = await signContent(store, content);
+				} catch (e) {
+					console.error('Failed to sign post:', e);
+				} finally {
+					signing = false;
+				}
+			}
+			await api.createPost(content, undefined, signature);
 			newPost = '';
 			pendingImageUrl = null;
 			await loadFeed();
@@ -81,6 +101,33 @@
 			error = e.message;
 		}
 	}
+
+	async function checkSignature(post: PostWithAuthor) {
+		if (!post.signature || !post.author_signing_key) {
+			signatureStatus[post.id] = null;
+			return;
+		}
+		if (signatureStatus[post.id]) return;
+		signatureStatus[post.id] = 'checking';
+		try {
+			const valid = await verifySignature(post.author_signing_key, post.content, post.signature);
+			signatureStatus[post.id] = valid ? 'verified' : 'unverified';
+		} catch {
+			signatureStatus[post.id] = 'unverified';
+		}
+	}
+
+	async function verifyAllPosts() {
+		for (const post of posts) {
+			await checkSignature(post);
+		}
+	}
+
+	$effect(() => {
+		if (posts.length > 0) {
+			verifyAllPosts();
+		}
+	});
 
 	function extractImage(content: string): { text: string; imageUrl: string | null } {
 		const match = content.match(/\[img:\s*(\/api\/v1\/uploads\/[^\]]+)\]/);
@@ -167,6 +214,10 @@
 		if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
 		return `${Math.floor(seconds / 86400)}d`;
 	}
+
+	function truncateKey(key: string): string {
+		return key.slice(0, 8) + '...' + key.slice(-4);
+	}
 </script>
 
 {#if !$auth.token}
@@ -184,8 +235,16 @@
 {:else}
 	<!-- Compose -->
 	<div class="mb-6 rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-4">
-		<div class="mb-2 text-xs text-[var(--terminal-dim)]">
-			<span class="text-[var(--terminal-green)]">@{$auth.user?.username}</span> <span class="text-[var(--terminal-dim)]">~</span> compose
+		<div class="mb-2 flex items-center justify-between text-xs text-[var(--terminal-dim)]">
+			<span>
+				<span class="text-[var(--terminal-green)]">@{$auth.user?.username}</span> <span class="text-[var(--terminal-dim)]">~</span> compose
+			</span>
+			{#if cryptoReady}
+				<span class="flex items-center gap-1 text-[10px] text-[var(--ocean-400)]">
+					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>
+					Ed25519 signing active
+				</span>
+			{/if}
 		</div>
 		<form onsubmit={(e) => { e.preventDefault(); submitPost(); }}>
 			<textarea
@@ -219,10 +278,15 @@
 				</div>
 				<button
 					type="submit"
-					disabled={!newPost.trim() && !pendingImageUrl}
-					class="rounded border border-[var(--ocean-400)] bg-transparent px-4 py-1.5 text-xs text-[var(--ocean-300)] transition-all hover:bg-[var(--ocean-400)]/10 hover:shadow-[0_0_8px_var(--ocean-400)] disabled:opacity-30 disabled:hover:shadow-none"
+					disabled={(!newPost.trim() && !pendingImageUrl) || signing}
+					class="flex items-center gap-1.5 rounded border border-[var(--ocean-400)] bg-transparent px-4 py-1.5 text-xs text-[var(--ocean-300)] transition-all hover:bg-[var(--ocean-400)]/10 hover:shadow-[0_0_8px_var(--ocean-400)] disabled:opacity-30 disabled:hover:shadow-none"
 				>
-					transmit
+					{#if signing}
+						<svg class="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3m0 12v3m-7.8-4.2 2.1-2.1m11.4-5.4 2.1-2.1M3 12h3m12 0h3M6.3 6.3l2.1 2.1m5.4 11.4 2.1 2.1"/></svg>
+						signing...
+					{:else}
+						transmit
+					{/if}
 				</button>
 			</div>
 		</form>
@@ -240,6 +304,7 @@
 		<div class="space-y-3">
 			{#each posts as post (post.id)}
 				{@const parsed = extractImage(post.content)}
+				{@const sigStatus = signatureStatus[post.id]}
 				<div class="group rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-4 transition-all hover:border-[var(--ocean-400)]/40 hover:shadow-[0_0_12px_var(--terminal-glow)]">
 					<div class="mb-2 flex items-center gap-2">
 						<div class="flex h-7 w-7 items-center justify-center rounded border border-[var(--terminal-border)] bg-[var(--ocean-800)] text-xs font-bold text-[var(--ocean-300)]">
@@ -264,7 +329,32 @@
 					{#if parsed.imageUrl}
 						<img src={parsed.imageUrl} alt="post attachment" class="mt-2 max-w-full rounded-lg border border-[var(--terminal-border)]" />
 					{/if}
-					<div class="mt-3 flex flex-wrap items-center gap-1.5 border-t border-[var(--terminal-border)]/50 pt-2">
+					<!-- Crypto badge -->
+					{#if sigStatus === 'verified'}
+						<div class="mt-2 flex items-center gap-1.5 text-[10px] text-[var(--terminal-green)]" title="Ed25519 signature verified against {post.author_signing_key ? truncateKey(post.author_signing_key) : 'unknown key'}">
+							<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/></svg>
+							<span>verified signature</span>
+							{#if post.author_signing_key}
+								<span class="text-[var(--terminal-dim)]">· key {truncateKey(post.author_signing_key)}</span>
+							{/if}
+						</div>
+					{:else if sigStatus === 'unverified'}
+						<div class="mt-2 flex items-center gap-1.5 text-[10px] text-[var(--terminal-red)]" title="Signature verification failed">
+							<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v3.75m0 3.75h.007v.008H12v-.008ZM21.721 12.752c0 5.592-3.824 10.29-9 11.623-5.176-1.332-9-6.03-9-11.622 0-1.31.21-2.571.598-3.751A11.959 11.959 0 0 1 12.721 2.715a11.959 11.959 0 0 1 8.25 3.285h.152c.388 1.18.598 2.442.598 3.752Z"/></svg>
+							<span>bad signature</span>
+						</div>
+					{:else if sigStatus === 'checking'}
+						<div class="mt-2 flex items-center gap-1.5 text-[10px] text-[var(--terminal-dim)]">
+							<svg class="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v3m0 12v3m-7.8-4.2 2.1-2.1m11.4-5.4 2.1-2.1M3 12h3m12 0h3M6.3 6.3l2.1 2.1m5.4 11.4 2.1 2.1"/></svg>
+							<span>verifying signature...</span>
+						</div>
+					{:else if !post.signature}
+						<div class="mt-2 flex items-center gap-1.5 text-[10px] text-[var(--terminal-dim)]/50">
+							<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13.5 10.5V6.75a4.5 4.5 0 1 1 9 0v3.75M3.75 21.75h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H3.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>
+							<span>unsigned</span>
+						</div>
+					{/if}
+					<div class="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--terminal-border)]/50 pt-2">
 						{#each post.reaction_counts.filter(r => r.count > 0) as reaction (reaction.emoji)}
 							<button
 								onclick={() => toggleReaction(post, reaction.emoji)}

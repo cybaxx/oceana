@@ -41,6 +41,8 @@ async fn main() {
         include_str!("../migrations/004_bot_flag.sql"),
         include_str!("../migrations/005_reactions.sql"),
         include_str!("../migrations/006_emoji_reactions.sql"),
+        include_str!("../migrations/007_signal_keys.sql"),
+        include_str!("../migrations/008_signing_key.sql"),
         include_str!("../migrations/999_seed.sql"),
     ] {
         for statement in migration_sql.split(';') {

@@ -17,6 +17,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 	});
 
 	if (!res.ok) {
+		if (res.status === 401 && state.token) {
+			auth.logout();
+			if (typeof window !== 'undefined') window.location.href = '/login';
+		}
 		const err = await res.json().catch(() => ({ error: res.statusText }));
 		throw new Error(err.error || err.message || res.statusText);
 	}
@@ -43,7 +47,8 @@ export const api = {
 	unfollow: (id: string) => request('DELETE', `/users/${id}/follow`),
 
 	// Posts
-	createPost: (content: string, parent_id?: string) => request('POST', '/posts', { content, parent_id }),
+	createPost: (content: string, parent_id?: string, signature?: string) =>
+		request('POST', '/posts', { content, parent_id, signature }),
 	getReplies: (id: string) => request('GET', `/posts/${id}/replies`),
 	getPost: (id: string) => request('GET', `/posts/${id}`),
 	deletePost: (id: string) => request('DELETE', `/posts/${id}`),
@@ -87,5 +92,22 @@ export const api = {
 		if (limit) params.set('limit', String(limit));
 		const qs = params.toString();
 		return request('GET', `/chats/${conversationId}/messages${qs ? `?${qs}` : ''}`);
-	}
+	},
+
+	// Signal Protocol keys
+	uploadKeyBundle: (bundle: {
+		identity_key: string;
+		signed_prekey: string;
+		signed_prekey_signature: string;
+		signed_prekey_id: number;
+		one_time_prekeys: { key_id: number; public_key: string }[];
+		signing_key?: string;
+	}) => request('PUT', '/keys/bundle', bundle),
+
+	getKeyBundle: (userId: string) => request('GET', `/keys/bundle/${userId}`),
+
+	getKeyCount: () => request('GET', '/keys/count'),
+
+	getConversationMembers: (conversationId: string): Promise<string[]> =>
+		request('GET', `/chats/${conversationId}/members`)
 };

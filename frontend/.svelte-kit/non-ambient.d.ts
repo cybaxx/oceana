@@ -29,7 +29,7 @@ declare module "$app/types" {
 	type MatcherParam<M> = M extends (param : string) => param is (infer U extends string) ? U : string;
 
 	export interface AppTypes {
-		RouteId(): "/" | "/chat" | "/chat/[id]" | "/login" | "/posts" | "/posts/[id]" | "/register" | "/settings" | "/users" | "/users/[id]";
+		RouteId(): "/" | "/about" | "/chat" | "/chat/[id]" | "/login" | "/posts" | "/posts/[id]" | "/register" | "/settings" | "/users" | "/users/[id]";
 		RouteParams(): {
 			"/chat/[id]": { id: string };
 			"/posts/[id]": { id: string };
@@ -37,6 +37,7 @@ declare module "$app/types" {
 		};
 		LayoutParams(): {
 			"/": { id?: string };
+			"/about": Record<string, never>;
 			"/chat": { id?: string };
 			"/chat/[id]": { id: string };
 			"/login": Record<string, never>;
@@ -47,7 +48,7 @@ declare module "$app/types" {
 			"/users": { id?: string };
 			"/users/[id]": { id: string }
 		};
-		Pathname(): "/" | "/chat" | `/chat/${string}` & {} | "/login" | `/posts/${string}` & {} | "/register" | "/settings" | `/users/${string}` & {};
+		Pathname(): "/" | "/about" | "/chat" | `/chat/${string}` & {} | "/login" | `/posts/${string}` & {} | "/register" | "/settings" | `/users/${string}` & {};
 		ResolvedPathname(): `${"" | `/${string}`}${ReturnType<AppTypes['Pathname']>}`;
 		Asset(): string & {};
 	}

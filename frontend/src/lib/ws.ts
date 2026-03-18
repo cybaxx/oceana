@@ -10,11 +10,7 @@ let handlers: MessageHandler[] = [];
 
 function getWsUrl(token: string): string {
 	const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-	// In dev, connect directly to backend; in prod, same host
-	const host = window.location.hostname === 'localhost'
-		? 'localhost:3001'
-		: window.location.host;
-	return `${proto}//${host}/api/v1/ws?token=${encodeURIComponent(token)}`;
+	return `${proto}//${window.location.host}/api/v1/ws?token=${encodeURIComponent(token)}`;
 }
 
 export function connectWs() {

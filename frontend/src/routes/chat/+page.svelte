@@ -4,12 +4,14 @@
 	import { conversations, loadConversations, initChatListeners } from '$lib/stores/chat';
 	import { connectWs } from '$lib/ws';
 	import { api } from '$lib/api';
+	import { initCrypto, getCryptoStore } from '$lib/crypto';
 	import type { Conversation } from '$lib/types';
 
 	let newUserId = $state('');
 	let creating = $state(false);
+	let cryptoReady = $state(false);
 
-	onMount(() => {
+	onMount(async () => {
 		if (!$auth.user) {
 			window.location.href = '/login';
 			return;
@@ -17,6 +19,9 @@
 		connectWs();
 		initChatListeners();
 		loadConversations();
+
+		await initCrypto($auth.user.id).catch((e: unknown) => console.error('Crypto init failed:', e));
+		cryptoReady = !!getCryptoStore();
 	});
 
 	async function createChat() {
@@ -49,6 +54,12 @@
 		<h1 class="text-lg font-bold text-[var(--ocean-300)]">
 			<span class="text-[var(--terminal-dim)]">$</span> messages
 		</h1>
+		{#if cryptoReady}
+			<div class="flex items-center gap-1.5 text-[10px] text-[var(--terminal-green)]">
+				<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>
+				E2EE active
+			</div>
+		{/if}
 	</div>
 
 	<!-- New conversation -->
@@ -76,9 +87,14 @@
 				class="block rounded border border-[var(--terminal-border)] p-3 no-underline transition-colors hover:border-[var(--ocean-400)] hover:bg-[var(--ocean-900)]/50"
 			>
 				<div class="flex items-center justify-between">
-					<span class="font-mono text-xs text-[var(--terminal-dim)]">
-						{conv.id.slice(0, 8)}...
-					</span>
+					<div class="flex items-center gap-2">
+						<span class="font-mono text-xs text-[var(--terminal-dim)]">
+							{conv.id.slice(0, 8)}...
+						</span>
+						{#if cryptoReady}
+							<svg class="h-3 w-3 text-[var(--terminal-green)]/40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>
+						{/if}
+					</div>
 					<span class="text-xs text-[var(--terminal-dim)]">
 						{formatTime(conv.last_message_at || conv.created_at)}
 					</span>
