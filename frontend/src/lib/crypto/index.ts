@@ -22,21 +22,25 @@ export async function initCrypto(userId: string): Promise<void> {
 			// Ensure signing key exists (upgrade path for existing users)
 			const signingKey = await s.getSigningKeyPair();
 			if (!signingKey) {
+				// First time generating signing key — upload it once
 				const signingPub = await generateSigningKey(s);
-				// Upload just the signing key via a bundle update
-				const { arrayBufferToBase64 } = await import('./keys');
-				const identityPub = arrayBufferToBase64(existing.pubKey);
-				const signedPreKeyId = (await s.getNextSignedPreKeyId()) - 1;
-				const signedPreKey = await s.loadSignedPreKey(signedPreKeyId);
-				if (signedPreKey) {
-					await api.uploadKeyBundle({
-						identity_key: identityPub,
-						signed_prekey: arrayBufferToBase64(signedPreKey.pubKey),
-						signed_prekey_signature: '',
-						signed_prekey_id: signedPreKeyId,
-						one_time_prekeys: [],
-						signing_key: signingPub
-					});
+				if (signingPub) {
+					try {
+						const { arrayBufferToBase64 } = await import('./keys');
+						const identityPub = arrayBufferToBase64(existing.pubKey);
+						const signedPreKeyId = (await s.getNextSignedPreKeyId()) - 1;
+						const signedPreKey = await s.loadSignedPreKey(signedPreKeyId);
+						await api.uploadKeyBundle({
+							identity_key: identityPub,
+							signed_prekey: signedPreKey ? arrayBufferToBase64(signedPreKey.pubKey) : '',
+							signed_prekey_signature: '',
+							signed_prekey_id: signedPreKeyId,
+							one_time_prekeys: [],
+							signing_key: signingPub
+						});
+					} catch (e) {
+						console.error('Failed to upload signing key:', e);
+					}
 				}
 			}
 			// Replenish OPKs if needed
@@ -56,3 +60,4 @@ export function getCryptoStore(): SignalProtocolStore | null {
 export { SignalProtocolStore } from './store';
 export { encryptMessage, decryptMessage, signContent, verifySignature, initSession } from './signal';
 export { arrayBufferToBase64, base64ToArrayBuffer } from './keys';
+export { generateSafetyNumber, formatSafetyNumber } from './fingerprint';

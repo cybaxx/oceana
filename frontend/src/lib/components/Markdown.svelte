@@ -1,9 +1,8 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
 	import { Marked } from 'marked';
 	import hljs from 'highlight.js';
 	import 'highlight.js/styles/github-dark-dimmed.css';
-	import DOMPurify from 'dompurify';
+	import DOMPurify from 'isomorphic-dompurify';
 
 	let { content }: { content: string } = $props();
 
@@ -79,19 +78,14 @@
 	const html = $derived.by(() => {
 		const { cleaned, embeds } = extractEmbeds(content);
 		const raw = marked.parse(cleaned) as string;
-		let sanitized: string;
-		if (browser) {
-			sanitized = DOMPurify.sanitize(raw, {
-				ADD_TAGS: ['iframe'],
-				ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'loading', 'src', 'data-embed']
-			});
-		} else {
-			sanitized = raw;
-		}
-		// Replace placeholders with embed HTML
-		return sanitized.replace(/<div data-embed="(\d+)"><\/div>/g, (_, idx) => {
+		// Replace embed placeholders before sanitizing so final output is always sanitized
+		const withEmbeds = raw.replace(/<div data-embed="(\d+)"><\/div>/g, (_, idx) => {
 			const embed = embeds[parseInt(idx)];
 			return embed ? embed.html : '';
+		});
+		return DOMPurify.sanitize(withEmbeds, {
+			ADD_TAGS: ['iframe'],
+			ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'loading', 'src']
 		});
 	});
 </script>

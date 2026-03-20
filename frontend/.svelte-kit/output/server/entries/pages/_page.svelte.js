@@ -1,10 +1,11 @@
-import { s as store_get, e as escape_html, a as attr, c as ensure_array_like, b as stringify, d as attr_class, u as unsubscribe_stores } from "../../chunks/index2.js";
+import { s as store_get, a as attr, e as escape_html, c as ensure_array_like, b as stringify, d as attr_class, u as unsubscribe_stores } from "../../chunks/index2.js";
 import { a as auth } from "../../chunks/auth.js";
 import { M as Markdown } from "../../chunks/Markdown.js";
 import "@privacyresearch/libsignal-protocol-typescript";
 function _page($$renderer, $$props) {
   $$renderer.component(($$renderer2) => {
     var $$store_subs;
+    let searchQuery = "";
     let posts = [];
     let newPost = "";
     let uploading = false;
@@ -21,9 +22,33 @@ function _page($$renderer, $$props) {
       }
       return { text: content, imageUrl: null };
     }
-    const EMOJI_QUICK = ["🔥", "🧠", "🫧", "⚡", "💀", "🌊"];
+    const EMOJI_GRID = [
+      "🔥",
+      "🧠",
+      "💀",
+      "⚡",
+      "🌊",
+      "🫧",
+      "❤️",
+      "😂",
+      "😮",
+      "😢",
+      "😡",
+      "🎉",
+      "👀",
+      "🙏",
+      "💯",
+      "🤔",
+      "🫡",
+      "👏",
+      "✨",
+      "🤯",
+      "🥶",
+      "🫠",
+      "🤝",
+      "🎵"
+    ];
     let pickerOpenFor = null;
-    let customEmojiInput = "";
     let expandedComments = {};
     let replies = {};
     let loadingReplies = {};
@@ -47,7 +72,11 @@ function _page($$renderer, $$props) {
   ~~~~~~~~~~~~~~~</pre> <p class="mb-1 text-sm text-[var(--ocean-100)]">a calm place to share thoughts</p> <p class="mb-8 text-xs text-[var(--terminal-dim)]">deep signals, not surface noise</p> <a href="/register" class="inline-block rounded border border-[var(--ocean-400)] px-6 py-2 text-sm text-[var(--ocean-300)] no-underline transition-all hover:bg-[var(--ocean-400)]/10 hover:shadow-[0_0_12px_var(--ocean-400)]">$ init --new-user</a></div>`);
     } else {
       $$renderer2.push("<!--[-1-->");
-      $$renderer2.push(`<div class="mb-6 rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-4"><div class="mb-2 flex items-center justify-between text-xs text-[var(--terminal-dim)]"><span><span class="text-[var(--terminal-green)]">@${escape_html(store_get($$store_subs ??= {}, "$auth", auth).user?.username)}</span> <span class="text-[var(--terminal-dim)]">~</span> compose</span> `);
+      $$renderer2.push(`<div class="relative mb-4"><input type="text"${attr("value", searchQuery)} placeholder="$ find --user" class="w-full rounded border border-[var(--terminal-border)] bg-[var(--ocean-900)] px-3 py-2 text-sm text-[var(--terminal-text)] placeholder:text-[var(--terminal-dim)] focus:border-[var(--ocean-400)] focus:outline-none"/> `);
+      {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--></div> <div class="mb-6 rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-4"><div class="mb-2 flex items-center justify-between text-xs text-[var(--terminal-dim)]"><span><span class="text-[var(--terminal-green)]">@${escape_html(store_get($$store_subs ??= {}, "$auth", auth).user?.username)}</span> <span class="text-[var(--terminal-dim)]">~</span> compose</span> `);
       {
         $$renderer2.push("<!--[-1-->");
       }
@@ -76,9 +105,9 @@ function _page($$renderer, $$props) {
       } else {
         $$renderer2.push("<!--[-1-->");
         $$renderer2.push(`<div class="space-y-3"><!--[-->`);
-        const each_array = ensure_array_like(posts);
-        for (let $$index_3 = 0, $$length = each_array.length; $$index_3 < $$length; $$index_3++) {
-          let post = each_array[$$index_3];
+        const each_array_1 = ensure_array_like(posts);
+        for (let $$index_4 = 0, $$length = each_array_1.length; $$index_4 < $$length; $$index_4++) {
+          let post = each_array_1[$$index_4];
           const parsed = extractImage(post.content);
           const sigStatus = signatureStatus[post.id];
           $$renderer2.push(`<div class="group rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-4 transition-all hover:border-[var(--ocean-400)]/40 hover:shadow-[0_0_12px_var(--terminal-glow)]"><div class="mb-2 flex items-center gap-2"><div class="flex h-7 w-7 items-center justify-center rounded border border-[var(--terminal-border)] bg-[var(--ocean-800)] text-xs font-bold text-[var(--ocean-300)]">${escape_html(post.author_username[0].toUpperCase())}</div> <a${attr("href", `/users/${stringify(post.author_id)}`)} class="text-xs font-semibold text-[var(--terminal-green)] no-underline hover:underline">@${escape_html(post.author_username)}</a> `);
@@ -135,26 +164,40 @@ function _page($$renderer, $$props) {
           } else {
             $$renderer2.push("<!--[-1-->");
           }
-          $$renderer2.push(`<!--]--> <div class="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--terminal-border)]/50 pt-2"><!--[-->`);
-          const each_array_1 = ensure_array_like(post.reaction_counts.filter((r) => r.count > 0));
-          for (let $$index = 0, $$length2 = each_array_1.length; $$index < $$length2; $$index++) {
-            let reaction = each_array_1[$$index];
-            $$renderer2.push(`<button${attr_class(`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-all ${stringify(post.user_reaction === reaction.emoji ? "border-[var(--ocean-400)] bg-[var(--ocean-400)]/15 text-[var(--ocean-200)]" : "border-[var(--terminal-border)] text-[var(--terminal-dim)] hover:border-[var(--ocean-400)]/60")}`)}><span>${escape_html(reaction.emoji)}</span> <span>${escape_html(reaction.count)}</span></button>`);
-          }
-          $$renderer2.push(`<!--]--> <div class="relative"><button class="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--terminal-border)] text-xs text-[var(--terminal-dim)] transition-all hover:border-[var(--ocean-400)]/60 hover:text-[var(--ocean-300)]">+</button> `);
-          if (pickerOpenFor === post.id) {
+          $$renderer2.push(`<!--]--> <div class="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--terminal-border)]/50 pt-2"><button${attr_class(`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-all ${stringify(post.user_reaction === "👍" ? "border-[var(--terminal-green)] bg-[var(--terminal-green)]/15 text-[var(--terminal-green)]" : "border-[var(--terminal-border)] text-[var(--terminal-dim)] hover:border-[var(--terminal-green)]/60")}`)}><span class="text-[10px]">▲</span>`);
+          if ((post.reaction_counts.find((r) => r.emoji === "👍")?.count || 0) > 0) {
             $$renderer2.push("<!--[0-->");
-            $$renderer2.push(`<div class="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-1 rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-1.5 shadow-lg"><div class="flex gap-1"><!--[-->`);
-            const each_array_2 = ensure_array_like(EMOJI_QUICK);
-            for (let $$index_1 = 0, $$length2 = each_array_2.length; $$index_1 < $$length2; $$index_1++) {
-              let emoji = each_array_2[$$index_1];
-              $$renderer2.push(`<button${attr_class(`flex h-7 w-7 items-center justify-center rounded text-sm transition-all hover:bg-[var(--ocean-400)]/15 ${stringify(post.user_reaction === emoji ? "bg-[var(--ocean-400)]/20" : "")}`)}>${escape_html(emoji)}</button>`);
-            }
-            $$renderer2.push(`<!--]--></div> <form class="flex gap-1"><input type="text"${attr("value", customEmojiInput)} placeholder="any emoji" class="w-20 rounded border border-[var(--terminal-border)] bg-[var(--ocean-950)] px-1.5 py-0.5 text-xs text-[var(--ocean-100)] focus:border-[var(--ocean-400)] focus:outline-none"/> <button type="submit" class="rounded border border-[var(--terminal-border)] px-1.5 py-0.5 text-xs text-[var(--terminal-dim)] hover:border-[var(--ocean-400)] hover:text-[var(--ocean-300)]">go</button></form></div>`);
+            $$renderer2.push(`<span>${escape_html(post.reaction_counts.find((r) => r.emoji === "👍")?.count)}</span>`);
           } else {
             $$renderer2.push("<!--[-1-->");
           }
-          $$renderer2.push(`<!--]--></div></div> <button class="mt-2 flex items-center gap-1.5 text-xs text-[var(--terminal-dim)] transition-all hover:text-[var(--ocean-300)]"><span class="text-[10px]">${escape_html(expandedComments[post.id] ? "▼" : "▶")}</span> <span>${escape_html(post.reply_count === 0 ? "comment" : `${post.reply_count} comment${post.reply_count === 1 ? "" : "s"}`)}</span></button> `);
+          $$renderer2.push(`<!--]--></button> <button${attr_class(`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-all ${stringify(post.user_reaction === "😬" ? "border-[var(--terminal-red)] bg-[var(--terminal-red)]/15 text-[var(--terminal-red)]" : "border-[var(--terminal-border)] text-[var(--terminal-dim)] hover:border-[var(--terminal-red)]/60")}`)}><span class="text-[10px]">▼</span>`);
+          if ((post.reaction_counts.find((r) => r.emoji === "😬")?.count || 0) > 0) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<span>${escape_html(post.reaction_counts.find((r) => r.emoji === "😬")?.count)}</span>`);
+          } else {
+            $$renderer2.push("<!--[-1-->");
+          }
+          $$renderer2.push(`<!--]--></button> <div class="relative"><button class="flex items-center gap-0.5 rounded-full border border-[var(--terminal-border)] px-2 py-0.5 text-xs text-[var(--terminal-dim)] transition-all hover:border-[var(--ocean-400)]/60 hover:text-[var(--ocean-300)]">😀<span class="text-[10px]">+</span></button> `);
+          if (pickerOpenFor === post.id) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<div class="absolute bottom-full left-0 z-10 mb-1 w-56 grid grid-cols-6 gap-1 rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-2 shadow-lg"><!--[-->`);
+            const each_array_2 = ensure_array_like(EMOJI_GRID);
+            for (let $$index_1 = 0, $$length2 = each_array_2.length; $$index_1 < $$length2; $$index_1++) {
+              let emoji = each_array_2[$$index_1];
+              $$renderer2.push(`<button${attr_class(`flex h-8 w-8 items-center justify-center rounded text-base transition-all hover:bg-[var(--ocean-400)]/15 ${stringify(post.user_reaction === emoji ? "bg-[var(--ocean-400)]/20" : "")}`)}>${escape_html(emoji)}</button>`);
+            }
+            $$renderer2.push(`<!--]--></div>`);
+          } else {
+            $$renderer2.push("<!--[-1-->");
+          }
+          $$renderer2.push(`<!--]--></div> <!--[-->`);
+          const each_array_3 = ensure_array_like(post.reaction_counts.filter((r) => r.count > 0 && r.emoji !== "👍" && r.emoji !== "😬"));
+          for (let $$index_2 = 0, $$length2 = each_array_3.length; $$index_2 < $$length2; $$index_2++) {
+            let reaction = each_array_3[$$index_2];
+            $$renderer2.push(`<button${attr_class(`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-all ${stringify(post.user_reaction === reaction.emoji ? "border-[var(--ocean-400)] bg-[var(--ocean-400)]/15 text-[var(--ocean-200)]" : "border-[var(--terminal-border)] text-[var(--terminal-dim)] hover:border-[var(--ocean-400)]/60")}`)}><span>${escape_html(reaction.emoji)}</span> <span>${escape_html(reaction.count)}</span></button>`);
+          }
+          $$renderer2.push(`<!--]--></div> <button class="mt-2 flex items-center gap-1.5 text-xs text-[var(--terminal-dim)] transition-all hover:text-[var(--ocean-300)]"><span class="text-[10px]">${escape_html(expandedComments[post.id] ? "▼" : "▶")}</span> <span>${escape_html(post.reply_count === 0 ? "comment" : `${post.reply_count} comment${post.reply_count === 1 ? "" : "s"}`)}</span></button> `);
           if (expandedComments[post.id]) {
             $$renderer2.push("<!--[0-->");
             $$renderer2.push(`<div class="mt-2 space-y-2 border-l-2 border-[var(--terminal-border)]/50 pl-3">`);
@@ -164,9 +207,9 @@ function _page($$renderer, $$props) {
             } else if (replies[post.id]?.length) {
               $$renderer2.push("<!--[1-->");
               $$renderer2.push(`<!--[-->`);
-              const each_array_3 = ensure_array_like(replies[post.id]);
-              for (let $$index_2 = 0, $$length2 = each_array_3.length; $$index_2 < $$length2; $$index_2++) {
-                let reply = each_array_3[$$index_2];
+              const each_array_4 = ensure_array_like(replies[post.id]);
+              for (let $$index_3 = 0, $$length2 = each_array_4.length; $$index_3 < $$length2; $$index_3++) {
+                let reply = each_array_4[$$index_3];
                 const replyParsed = extractImage(reply.content);
                 $$renderer2.push(`<div class="rounded border border-[var(--terminal-border)]/40 bg-[var(--ocean-950)] p-2.5"><div class="mb-1 flex items-center gap-1.5"><a${attr("href", `/users/${stringify(reply.author_id)}`)} class="text-[10px] font-semibold text-[var(--terminal-green)] no-underline hover:underline">@${escape_html(reply.author_username)}</a> `);
                 if (reply.author_is_bot) {

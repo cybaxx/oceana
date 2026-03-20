@@ -56,9 +56,9 @@ export const api = {
 	unreactToPost: (id: string) => request('DELETE', `/posts/${id}/react`),
 
 	// Feed
-	getFeed: (before?: string, limit?: number) => {
+	getFeed: (cursor?: string, limit?: number) => {
 		const params = new URLSearchParams();
-		if (before) params.set('before', before);
+		if (cursor) params.set('cursor', cursor);
 		if (limit) params.set('limit', String(limit));
 		const qs = params.toString();
 		return request('GET', `/feed${qs ? `?${qs}` : ''}`);
@@ -86,9 +86,9 @@ export const api = {
 		return res.json();
 	},
 
-	getMessages: (conversationId: string, before?: string, limit?: number) => {
+	getMessages: (conversationId: string, cursor?: string, limit?: number) => {
 		const params = new URLSearchParams();
-		if (before) params.set('before', before);
+		if (cursor) params.set('cursor', cursor);
 		if (limit) params.set('limit', String(limit));
 		const qs = params.toString();
 		return request('GET', `/chats/${conversationId}/messages${qs ? `?${qs}` : ''}`);
@@ -109,5 +109,9 @@ export const api = {
 	getKeyCount: () => request('GET', '/keys/count'),
 
 	getConversationMembers: (conversationId: string): Promise<string[]> =>
-		request('GET', `/chats/${conversationId}/members`)
+		request('GET', `/chats/${conversationId}/members`),
+
+	searchUsers: (q: string) => request('GET', `/users/search?q=${encodeURIComponent(q)}`),
+
+	getWsTicket: () => request<{ ticket: string }>('POST', '/ws/ticket')
 };

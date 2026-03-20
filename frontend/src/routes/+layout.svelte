@@ -1,8 +1,16 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
+	import { initCrypto } from '$lib/crypto';
 	import '../app.css';
 
 	let { children } = $props();
+
+	onMount(() => {
+		if ($auth.user) {
+			initCrypto($auth.user.id).catch((e: unknown) => console.error('Crypto init failed:', e));
+		}
+	});
 
 	function logout() {
 		auth.logout();

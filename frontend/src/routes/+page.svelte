@@ -4,7 +4,35 @@
 	import type { PostWithAuthor } from '$lib/types';
 	import { onMount } from 'svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
-	import { initCrypto, getCryptoStore, signContent, verifySignature } from '$lib/crypto';
+	import { getCryptoStore, signContent, verifySignature } from '$lib/crypto';
+
+	let searchQuery = $state('');
+	let searchResults = $state<{ id: string; username: string; display_name: string | null; is_bot: boolean }[]>([]);
+	let searchOpen = $state(false);
+	let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	function handleSearchInput() {
+		if (searchTimeout) clearTimeout(searchTimeout);
+		if (!searchQuery.trim()) {
+			searchResults = [];
+			searchOpen = false;
+			return;
+		}
+		searchTimeout = setTimeout(async () => {
+			try {
+				searchResults = (await api.searchUsers(searchQuery.trim())) as typeof searchResults;
+				searchOpen = searchResults.length > 0;
+			} catch {
+				searchResults = [];
+				searchOpen = false;
+			}
+		}, 300);
+	}
+
+	function dismissSearch() {
+		// Small delay so click on result registers first
+		setTimeout(() => { searchOpen = false; }, 150);
+	}
 
 	let posts = $state<PostWithAuthor[]>([]);
 	let newPost = $state('');
@@ -14,6 +42,7 @@
 	let loading = $state(false);
 	let loadingMore = $state(false);
 	let hasMore = $state(true);
+	let nextCursor = $state<string | null>(null);
 	let error = $state('');
 	let signatureStatus = $state<Record<string, 'verified' | 'unverified' | 'checking' | null>>({});
 	let signing = $state(false);
@@ -21,18 +50,17 @@
 
 	onMount(async () => {
 		if (!$auth.token) return;
-		if ($auth.user) {
-			await initCrypto($auth.user.id).catch((e: unknown) => console.error('Crypto init failed:', e));
-			cryptoReady = !!getCryptoStore();
-		}
+		cryptoReady = !!getCryptoStore();
 		await loadFeed();
 	});
 
 	async function loadFeed() {
 		loading = true;
 		try {
-			posts = await api.getFeed() as PostWithAuthor[];
-			hasMore = posts.length >= 20;
+			const res = await api.getFeed() as { data: PostWithAuthor[]; next_cursor: string | null };
+			posts = res.data;
+			nextCursor = res.next_cursor;
+			hasMore = !!nextCursor;
 		} catch (e: any) {
 			error = e.message;
 		} finally {
@@ -41,13 +69,13 @@
 	}
 
 	async function loadMore() {
-		if (!hasMore || loadingMore) return;
+		if (!hasMore || loadingMore || !nextCursor) return;
 		loadingMore = true;
 		try {
-			const last = posts[posts.length - 1];
-			const older = await api.getFeed(last.created_at) as PostWithAuthor[];
-			posts = [...posts, ...older];
-			hasMore = older.length >= 20;
+			const res = await api.getFeed(nextCursor) as { data: PostWithAuthor[]; next_cursor: string | null };
+			posts = [...posts, ...res.data];
+			nextCursor = res.next_cursor;
+			hasMore = !!nextCursor;
 		} catch (e: any) {
 			error = e.message;
 		} finally {
@@ -156,7 +184,8 @@
 		if (expandedComments[postId] && !replies[postId]) {
 			loadingReplies[postId] = true;
 			try {
-				replies[postId] = await api.getReplies(postId) as PostWithAuthor[];
+				const res = await api.getReplies(postId) as { data: PostWithAuthor[]; next_cursor: string | null };
+				replies[postId] = res.data;
 			} catch (e: any) {
 				error = e.message;
 			} finally {
@@ -172,7 +201,8 @@
 		try {
 			await api.createPost(text, postId);
 			replyInputs[postId] = '';
-			replies[postId] = await api.getReplies(postId) as PostWithAuthor[];
+			const replyRes = await api.getReplies(postId) as { data: PostWithAuthor[]; next_cursor: string | null };
+			replies[postId] = replyRes.data;
 			const post = posts.find(p => p.id === postId);
 			if (post) post.reply_count = (replies[postId] || []).length;
 			posts = posts;
@@ -237,6 +267,37 @@
 		</a>
 	</div>
 {:else}
+	<!-- Search -->
+	<div class="relative mb-4">
+		<input
+			type="text"
+			bind:value={searchQuery}
+			oninput={handleSearchInput}
+			onblur={dismissSearch}
+			placeholder="$ find --user"
+			class="w-full rounded border border-[var(--terminal-border)] bg-[var(--ocean-900)] px-3 py-2 text-sm text-[var(--terminal-text)] placeholder:text-[var(--terminal-dim)] focus:border-[var(--ocean-400)] focus:outline-none"
+		/>
+		{#if searchOpen}
+			<div class="absolute z-20 mt-1 w-full rounded border border-[var(--terminal-border)] bg-[var(--ocean-900)] shadow-lg">
+				{#each searchResults as result}
+					<a
+						href="/users/{result.id}"
+						class="flex items-center gap-2 px-3 py-2 text-sm text-[var(--ocean-100)] no-underline hover:bg-[var(--ocean-800)]"
+						onclick={() => { searchOpen = false; searchQuery = ''; }}
+					>
+						<span class="text-[var(--terminal-green)]">@{result.username}</span>
+						{#if result.display_name}
+							<span class="text-xs text-[var(--terminal-dim)]">{result.display_name}</span>
+						{/if}
+						{#if result.is_bot}
+							<span class="rounded border border-[var(--ocean-400)]/40 bg-[var(--ocean-400)]/10 px-1 py-0 text-[9px] font-medium text-[var(--ocean-300)]">BOT</span>
+						{/if}
+					</a>
+				{/each}
+			</div>
+		{/if}
+	</div>
+
 	<!-- Compose -->
 	<div class="mb-6 rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-4">
 		<div class="mb-2 flex items-center justify-between text-xs text-[var(--terminal-dim)]">
@@ -381,11 +442,11 @@
 								class="flex items-center gap-0.5 rounded-full border border-[var(--terminal-border)] px-2 py-0.5 text-xs text-[var(--terminal-dim)] transition-all hover:border-[var(--ocean-400)]/60 hover:text-[var(--ocean-300)]"
 							>😀<span class="text-[10px]">+</span></button>
 							{#if pickerOpenFor === post.id}
-								<div class="absolute bottom-full left-0 z-10 mb-1 grid grid-cols-6 gap-0.5 rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-1.5 shadow-lg">
+								<div class="absolute bottom-full left-0 z-10 mb-1 w-56 grid grid-cols-6 gap-1 rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-2 shadow-lg">
 									{#each EMOJI_GRID as emoji}
 										<button
 											onclick={() => toggleReaction(post, emoji)}
-											class="flex h-7 w-7 items-center justify-center rounded text-sm transition-all hover:bg-[var(--ocean-400)]/15 {post.user_reaction === emoji ? 'bg-[var(--ocean-400)]/20' : ''}"
+											class="flex h-8 w-8 items-center justify-center rounded text-base transition-all hover:bg-[var(--ocean-400)]/15 {post.user_reaction === emoji ? 'bg-[var(--ocean-400)]/20' : ''}"
 										>{emoji}</button>
 									{/each}
 								</div>

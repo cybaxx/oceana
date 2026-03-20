@@ -36,7 +36,8 @@ impl From<sqlx::Error> for AppError {
 
 impl From<jsonwebtoken::errors::Error> for AppError {
     fn from(e: jsonwebtoken::errors::Error) -> Self {
-        AppError::Unauthorized(e.to_string())
+        tracing::debug!("JWT error: {e}");
+        AppError::Unauthorized("Invalid token".into())
     }
 }
 

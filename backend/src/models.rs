@@ -1,3 +1,4 @@
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -8,6 +9,7 @@ use uuid::Uuid;
 pub struct User {
     pub id: Uuid,
     pub username: String,
+    #[serde(skip_serializing)]
     pub email: String,
     #[serde(skip_serializing)]
     pub password_hash: String,
@@ -169,8 +171,8 @@ pub struct CreateConversationRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct MessagesQuery {
-    pub before: Option<DateTime<Utc>>,
+pub struct CursorQuery {
+    pub cursor: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -192,6 +194,10 @@ pub enum WsClientMessage {
     Typing {
         conversation_id: Uuid,
     },
+    #[serde(rename = "verify_identity")]
+    VerifyIdentity {
+        target_user_id: Uuid,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,6 +218,11 @@ pub enum WsServerMessage {
     #[serde(rename = "error")]
     Error {
         message: String,
+    },
+    #[serde(rename = "verify_identity")]
+    VerifyIdentity {
+        from_user_id: Uuid,
+        from_username: String,
     },
 }
 
@@ -236,10 +247,41 @@ pub struct PostWithAuthor {
     pub author_signing_key: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PaginatedResponse<T: Serialize> {
+    pub data: Vec<T>,
+    pub next_cursor: Option<String>,
+}
+
+pub fn encode_cursor(created_at: &DateTime<Utc>, id: &Uuid) -> String {
+    let raw = format!("{}|{}", created_at.to_rfc3339(), id);
+    base64::engine::general_purpose::STANDARD.encode(raw)
+}
+
+pub fn decode_cursor(s: &str) -> Result<(DateTime<Utc>, Uuid), String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(s)
+        .map_err(|e| format!("Invalid cursor: {e}"))?;
+    let raw = String::from_utf8(bytes).map_err(|e| format!("Invalid cursor: {e}"))?;
+    let (ts_str, id_str) = raw.split_once('|').ok_or("Invalid cursor format")?;
+    let ts = DateTime::parse_from_rfc3339(ts_str)
+        .map_err(|e| format!("Invalid cursor timestamp: {e}"))?
+        .with_timezone(&Utc);
+    let id = Uuid::parse_str(id_str).map_err(|e| format!("Invalid cursor id: {e}"))?;
+    Ok((ts, id))
+}
+
 #[derive(Debug, Deserialize)]
-pub struct FeedQuery {
-    pub before: Option<DateTime<Utc>>,
-    pub limit: Option<i64>,
+pub struct SearchQuery {
+    pub q: String,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct UserSearchResult {
+    pub id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub is_bot: bool,
 }
 
 #[cfg(test)]
@@ -264,7 +306,7 @@ mod tests {
         let json = serde_json::to_value(&test_user()).unwrap();
         assert!(json.get("password_hash").is_none());
         assert!(json.get("username").is_some());
-        assert!(json.get("email").is_some());
+        assert!(json.get("email").is_none());
     }
 
     #[test]
@@ -272,7 +314,7 @@ mod tests {
         let user = test_user();
         let json = serde_json::to_value(&user).unwrap();
         assert_eq!(json["username"], "testuser");
-        assert_eq!(json["email"], "test@example.com");
+        assert!(json.get("email").is_none());
         assert_eq!(json["display_name"], "Test User");
         assert!(json["bio"].is_null());
         assert!(json.get("id").is_some());
@@ -389,11 +431,30 @@ mod tests {
     }
 
     #[test]
-    fn feed_query_deserializes_with_defaults() {
+    fn cursor_query_deserializes_with_defaults() {
         let json = r#"{}"#;
-        let q: FeedQuery = serde_json::from_str(json).unwrap();
-        assert!(q.before.is_none());
+        let q: CursorQuery = serde_json::from_str(json).unwrap();
+        assert!(q.cursor.is_none());
         assert!(q.limit.is_none());
+    }
+
+    #[test]
+    fn cursor_encode_decode_roundtrip() {
+        let ts = Utc::now();
+        let id = Uuid::new_v4();
+        let cursor = encode_cursor(&ts, &id);
+        let (decoded_ts, decoded_id) = decode_cursor(&cursor).unwrap();
+        assert_eq!(decoded_id, id);
+        // Compare as RFC3339 strings since sub-nanosecond precision may differ
+        assert_eq!(decoded_ts.to_rfc3339(), ts.to_rfc3339());
+    }
+
+    #[test]
+    fn decode_cursor_rejects_invalid() {
+        assert!(decode_cursor("not-base64!!!").is_err());
+        // Valid base64 but bad format
+        let bad = base64::engine::general_purpose::STANDARD.encode("no-pipe-here");
+        assert!(decode_cursor(&bad).is_err());
     }
 
     #[test]

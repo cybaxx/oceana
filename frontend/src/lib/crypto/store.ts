@@ -1,7 +1,7 @@
 // IndexedDB-backed Signal Protocol store
 // Implements the store interfaces needed by @privacyresearch/libsignal-protocol-typescript
 
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function dbName(userId: string): string {
 	return `oceana-keys-${userId}`;
@@ -10,16 +10,23 @@ function dbName(userId: string): string {
 function openDB(userId: string): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
 		const request = indexedDB.open(dbName(userId), DB_VERSION);
-		request.onupgradeneeded = () => {
+		request.onupgradeneeded = (event) => {
 			const db = request.result;
 			if (!db.objectStoreNames.contains('identity')) db.createObjectStore('identity');
 			if (!db.objectStoreNames.contains('sessions')) db.createObjectStore('sessions');
 			if (!db.objectStoreNames.contains('signedPrekeys')) db.createObjectStore('signedPrekeys');
 			if (!db.objectStoreNames.contains('prekeys')) db.createObjectStore('prekeys');
 			if (!db.objectStoreNames.contains('identityKeys')) db.createObjectStore('identityKeys');
+			if (!db.objectStoreNames.contains('groupKeys')) db.createObjectStore('groupKeys');
 		};
 		request.onsuccess = () => resolve(request.result);
-		request.onerror = () => reject(request.error);
+		request.onerror = () => {
+			// If DB was already at a higher version (e.g. v3 from a previous deploy),
+			// just open it without specifying a version
+			const retry = indexedDB.open(dbName(userId));
+			retry.onsuccess = () => resolve(retry.result);
+			retry.onerror = () => reject(retry.error);
+		};
 	});
 }
 
@@ -190,6 +197,34 @@ export class SignalProtocolStore {
 	async setNextSignedPreKeyId(id: number): Promise<void> {
 		const db = this.ensureDB();
 		await idbPut(db, 'identity', 'nextSignedPreKeyId', id);
+	}
+
+	// Sent message plaintext cache — uses localStorage to avoid DB version bumps
+	async storeSentMessage(ciphertext: string, plaintext: string): Promise<void> {
+		try {
+			const key = `oceana-sent-${ciphertext.slice(0, 48)}`;
+			localStorage.setItem(key, plaintext);
+		} catch { /* storage full or unavailable */ }
+	}
+
+	async loadSentMessage(ciphertext: string): Promise<string | undefined> {
+		try {
+			const key = `oceana-sent-${ciphertext.slice(0, 48)}`;
+			return localStorage.getItem(key) ?? undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	// Group keys
+	async storeGroupKey(groupId: string, key: CryptoKey): Promise<void> {
+		const db = this.ensureDB();
+		await idbPut(db, 'groupKeys', groupId, key);
+	}
+
+	async loadGroupKey(groupId: string): Promise<CryptoKey | undefined> {
+		const db = this.ensureDB();
+		return idbGet(db, 'groupKeys', groupId);
 	}
 
 	private arrayBuffersEqual(a: ArrayBuffer, b: ArrayBuffer): boolean {

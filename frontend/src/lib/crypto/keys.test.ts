@@ -5,14 +5,19 @@ import {
 	base64ToArrayBuffer,
 	generateIdentityAndKeys,
 	generateSigningKey,
-	getSigningPublicKey
+	getSigningPublicKey,
+	uploadKeyBundle,
+	replenishPreKeysIfNeeded
 } from './keys';
 
 // Mock the api module to prevent network calls
+const mockUploadKeyBundle = vi.fn().mockResolvedValue(undefined);
+const mockGetKeyCount = vi.fn().mockResolvedValue({ count: 100 });
+
 vi.mock('$lib/api', () => ({
 	api: {
-		uploadKeyBundle: vi.fn(),
-		getKeyCount: vi.fn()
+		uploadKeyBundle: (...args: any[]) => mockUploadKeyBundle(...args),
+		getKeyCount: (...args: any[]) => mockGetKeyCount(...args)
 	}
 }));
 
@@ -90,5 +95,114 @@ describe('generateSigningKey', () => {
 
 	it('returns null when no signing key set', async () => {
 		expect(await getSigningPublicKey(store)).toBeNull();
+	});
+
+	it('generates different keys each time', async () => {
+		const store2 = new SignalProtocolStore(`test-signing2-${Math.random()}`);
+		await store2.open();
+		const pub1 = await generateSigningKey(store);
+		const pub2 = await generateSigningKey(store2);
+		expect(pub1).not.toBe(pub2);
+	});
+});
+
+describe('uploadKeyBundle', () => {
+	beforeEach(() => {
+		mockUploadKeyBundle.mockClear();
+	});
+
+	it('generates keys and uploads full bundle including signing key', async () => {
+		const store = new SignalProtocolStore(`test-upload-${Math.random()}`);
+		await store.open();
+
+		await uploadKeyBundle(store);
+
+		expect(mockUploadKeyBundle).toHaveBeenCalledTimes(1);
+		const bundle = mockUploadKeyBundle.mock.calls[0][0];
+		expect(bundle.identity_key).toBeTruthy();
+		expect(bundle.signed_prekey).toBeTruthy();
+		expect(bundle.signed_prekey_signature).toBeTruthy();
+		expect(typeof bundle.signed_prekey_id).toBe('number');
+		expect(bundle.one_time_prekeys).toHaveLength(100);
+		expect(bundle.signing_key).toBeTruthy();
+	});
+
+	it('stores keys locally before uploading', async () => {
+		const store = new SignalProtocolStore(`test-upload2-${Math.random()}`);
+		await store.open();
+
+		await uploadKeyBundle(store);
+
+		expect(await store.getIdentityKeyPair()).toBeDefined();
+		expect(await store.getLocalRegistrationId()).toBeDefined();
+		expect(await store.getSigningKeyPair()).toBeDefined();
+	});
+});
+
+describe('replenishPreKeysIfNeeded', () => {
+	beforeEach(() => {
+		mockUploadKeyBundle.mockClear();
+		mockGetKeyCount.mockClear();
+	});
+
+	it('does nothing when server has enough keys', async () => {
+		mockGetKeyCount.mockResolvedValueOnce({ count: 50 });
+		const store = new SignalProtocolStore(`test-replenish1-${Math.random()}`);
+		await store.open();
+		await generateIdentityAndKeys(store);
+
+		await replenishPreKeysIfNeeded(store);
+
+		expect(mockUploadKeyBundle).not.toHaveBeenCalled();
+	});
+
+	it('generates new prekeys when below default threshold (20)', async () => {
+		mockGetKeyCount.mockResolvedValueOnce({ count: 5 });
+		const store = new SignalProtocolStore(`test-replenish2-${Math.random()}`);
+		await store.open();
+		await generateIdentityAndKeys(store);
+
+		const beforeId = await store.getNextPreKeyId();
+		await replenishPreKeysIfNeeded(store);
+
+		expect(mockUploadKeyBundle).toHaveBeenCalledTimes(1);
+		const bundle = mockUploadKeyBundle.mock.calls[0][0];
+		expect(bundle.one_time_prekeys).toHaveLength(95); // 100 - 5
+
+		const afterId = await store.getNextPreKeyId();
+		expect(afterId).toBe(beforeId + 95);
+	});
+
+	it('respects custom threshold', async () => {
+		mockGetKeyCount.mockResolvedValueOnce({ count: 30 });
+		const store = new SignalProtocolStore(`test-replenish3-${Math.random()}`);
+		await store.open();
+		await generateIdentityAndKeys(store);
+
+		await replenishPreKeysIfNeeded(store, 50);
+
+		expect(mockUploadKeyBundle).toHaveBeenCalledTimes(1);
+		expect(mockUploadKeyBundle.mock.calls[0][0].one_time_prekeys).toHaveLength(70);
+	});
+
+	it('handles API errors gracefully', async () => {
+		mockGetKeyCount.mockRejectedValueOnce(new Error('network error'));
+		const store = new SignalProtocolStore(`test-replenish4-${Math.random()}`);
+		await store.open();
+		await generateIdentityAndKeys(store);
+
+		// Should not throw
+		await replenishPreKeysIfNeeded(store);
+		expect(mockUploadKeyBundle).not.toHaveBeenCalled();
+	});
+
+	it('does nothing if no identity key pair exists', async () => {
+		mockGetKeyCount.mockResolvedValueOnce({ count: 0 });
+		const store = new SignalProtocolStore(`test-replenish5-${Math.random()}`);
+		await store.open();
+		// No keys generated
+
+		await replenishPreKeysIfNeeded(store);
+		expect(mockUploadKeyBundle).not.toHaveBeenCalled();
 	});
 });

@@ -8,6 +8,7 @@ export default defineConfig({
 		}
 	},
 	test: {
-		setupFiles: ['fake-indexeddb/auto']
+		setupFiles: ['fake-indexeddb/auto'],
+		exclude: ['e2e/**', 'node_modules/**']
 	}
 });

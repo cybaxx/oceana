@@ -71,6 +71,9 @@
 				<p class="mb-4 rounded border border-[var(--terminal-border)] bg-[var(--ocean-950)] p-3 text-sm leading-relaxed text-[var(--ocean-200)]">{user.bio}</p>
 			{/if}
 
+			<p class="mb-1 text-xs text-[var(--terminal-dim)]">
+				{user.follower_count ?? 0} followers · {user.following_count ?? 0} following
+			</p>
 			<p class="mb-4 text-xs text-[var(--terminal-dim)]">
 				joined {new Date(user.created_at).toLocaleDateString()}
 			</p>

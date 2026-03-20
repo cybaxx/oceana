@@ -64,12 +64,19 @@ export interface PreKeyBundleResponse {
 	one_time_prekey: { key_id: number; public_key: string } | null;
 }
 
+// Message type constants
+export const MSG_TYPE_GROUP_KEY_DISTRIBUTION = 100;
+export const MSG_TYPE_GROUP_MESSAGE = 101;
+
 export interface WsServerMessage {
-	type: 'new_message' | 'typing' | 'error';
+	type: 'new_message' | 'typing' | 'error' | 'verify_identity';
 	message?: Message;
 	sender_username?: string;
 	sender_is_bot?: boolean;
 	conversation_id?: string;
 	user_id?: string;
 	username?: string;
+	// verify_identity fields
+	from_user_id?: string;
+	from_username?: string;
 }

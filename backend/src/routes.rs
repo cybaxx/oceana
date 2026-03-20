@@ -3,6 +3,7 @@ use axum::extract::{Multipart, Path, Query, State};
 use axum::routing::{get, post, put, delete};
 use axum::{Json, Router};
 use futures::{SinkExt, StreamExt};
+use std::time::Instant;
 use uuid::Uuid;
 
 use crate::auth::{self, AuthUser};
@@ -18,6 +19,7 @@ pub fn router() -> Router<AppState> {
         .route("/auth/register", post(register))
         .route("/auth/login", post(login))
         // Users
+        .route("/users/search", get(search_users))
         .route("/users/:id", get(get_user))
         .route("/users/:id/follow", post(follow_user).delete(unfollow_user))
         .route("/profile", put(update_profile))
@@ -43,6 +45,7 @@ pub fn router() -> Router<AppState> {
         .route("/upload", post(upload_image))
         .route("/uploads/:filename", get(serve_upload))
         // WebSocket
+        .route("/ws/ticket", post(create_ws_ticket))
         .route("/ws", get(ws_handler))
 }
 
@@ -63,6 +66,9 @@ async fn register(
     }
     if body.password.len() < 8 {
         return Err(AppError::BadRequest("Password must be at least 8 characters".into()));
+    }
+    if !body.email.contains('@') || !body.email.contains('.') {
+        return Err(AppError::BadRequest("Invalid email format".into()));
     }
 
     let password_hash = auth::hash_password(&body.password)?;
@@ -109,13 +115,42 @@ async fn login(
 async fn get_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<User>, AppError> {
+) -> Result<Json<serde_json::Value>, AppError> {
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
         .bind(id)
         .fetch_optional(&state.db)
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".into()))?;
-    Ok(Json(user))
+
+    let follower_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM follows WHERE followed_id = $1")
+        .bind(id)
+        .fetch_one(&state.db)
+        .await?;
+
+    let following_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM follows WHERE follower_id = $1")
+        .bind(id)
+        .fetch_one(&state.db)
+        .await?;
+
+    let mut json = serde_json::to_value(&user).unwrap();
+    json["follower_count"] = serde_json::json!(follower_count);
+    json["following_count"] = serde_json::json!(following_count);
+    Ok(Json(json))
+}
+
+async fn search_users(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Query(params): Query<SearchQuery>,
+) -> Result<Json<Vec<UserSearchResult>>, AppError> {
+    let pattern = format!("%{}%", params.q);
+    let users = sqlx::query_as::<_, UserSearchResult>(
+        "SELECT id, username, display_name, is_bot FROM users WHERE username ILIKE $1 OR display_name ILIKE $1 LIMIT 20"
+    )
+    .bind(&pattern)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(users))
 }
 
 async fn update_profile(
@@ -123,6 +158,17 @@ async fn update_profile(
     auth: AuthUser,
     Json(body): Json<UpdateProfileRequest>,
 ) -> Result<Json<User>, AppError> {
+    if let Some(ref name) = body.display_name {
+        if name.len() > 64 {
+            return Err(AppError::BadRequest("Display name must be at most 64 characters".into()));
+        }
+    }
+    if let Some(ref bio) = body.bio {
+        if bio.len() > 500 {
+            return Err(AppError::BadRequest("Bio must be at most 500 characters".into()));
+        }
+    }
+
     let user = sqlx::query_as::<_, User>(
         "UPDATE users SET display_name = COALESCE($1, display_name), bio = COALESCE($2, bio) WHERE id = $3 RETURNING *"
     )
@@ -271,7 +317,18 @@ async fn get_replies(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<Vec<PostWithAuthor>>, AppError> {
+    Query(params): Query<CursorQuery>,
+) -> Result<Json<PaginatedResponse<PostWithAuthor>>, AppError> {
+    let limit = params.limit.unwrap_or(50).min(100);
+
+    let (cursor_ts, cursor_id) = match &params.cursor {
+        Some(c) => {
+            let (ts, cid) = decode_cursor(c).map_err(|e| AppError::BadRequest(e))?;
+            (ts, Some(cid))
+        }
+        None => (chrono::DateTime::<chrono::Utc>::MIN_UTC, None),
+    };
+
     let rows = sqlx::query_as::<_, PostWithAuthorRow>(
         r#"
         SELECT p.id, p.author_id, p.content, p.parent_id, p.signature, p.created_at,
@@ -286,15 +343,20 @@ async fn get_replies(
         FROM posts p
         JOIN users u ON u.id = p.author_id
         WHERE p.parent_id = $2
-        ORDER BY p.created_at ASC
+          AND (p.created_at, p.id) > ($3, COALESCE($5, '00000000-0000-0000-0000-000000000000'::uuid))
+        ORDER BY p.created_at ASC, p.id ASC
+        LIMIT $4
         "#,
     )
     .bind(auth.user_id)
     .bind(id)
+    .bind(cursor_ts)
+    .bind(limit)
+    .bind(cursor_id)
     .fetch_all(&state.db)
     .await?;
 
-    let posts = rows.into_iter().map(|r| PostWithAuthor {
+    let posts: Vec<PostWithAuthor> = rows.into_iter().map(|r| PostWithAuthor {
         post: Post {
             id: r.id,
             author_id: r.author_id,
@@ -312,7 +374,9 @@ async fn get_replies(
         author_signing_key: r.author_signing_key,
     }).collect();
 
-    Ok(Json(posts))
+    let next_cursor = posts.last().map(|p| encode_cursor(&p.post.created_at, &p.post.id));
+
+    Ok(Json(PaginatedResponse { data: posts, next_cursor }))
 }
 
 // --- Feed ---
@@ -320,12 +384,18 @@ async fn get_replies(
 async fn get_feed(
     State(state): State<AppState>,
     auth: AuthUser,
-    Query(params): Query<FeedQuery>,
-) -> Result<Json<Vec<PostWithAuthor>>, AppError> {
+    Query(params): Query<CursorQuery>,
+) -> Result<Json<PaginatedResponse<PostWithAuthor>>, AppError> {
     let limit = params.limit.unwrap_or(20).min(50);
-    let before = params.before.unwrap_or_else(|| chrono::Utc::now());
 
-    // Posts from people you follow, plus your own, newest first
+    let (cursor_ts, cursor_id) = match &params.cursor {
+        Some(c) => {
+            let (ts, id) = decode_cursor(c).map_err(|e| AppError::BadRequest(e))?;
+            (ts, Some(id))
+        }
+        None => (chrono::Utc::now(), None),
+    };
+
     let rows = sqlx::query_as::<_, PostWithAuthorRow>(
         r#"
         SELECT p.id, p.author_id, p.content, p.parent_id, p.signature, p.created_at,
@@ -342,18 +412,19 @@ async fn get_feed(
         WHERE (p.author_id IN (SELECT followed_id FROM follows WHERE follower_id = $1)
                OR p.author_id = $1)
           AND p.parent_id IS NULL
-          AND p.created_at < $2
-        ORDER BY p.created_at DESC
+          AND (p.created_at, p.id) < ($2, COALESCE($4, '00000000-0000-0000-0000-000000000000'::uuid))
+        ORDER BY p.created_at DESC, p.id DESC
         LIMIT $3
         "#,
     )
     .bind(auth.user_id)
-    .bind(before)
+    .bind(cursor_ts)
     .bind(limit)
+    .bind(cursor_id)
     .fetch_all(&state.db)
     .await?;
 
-    let posts = rows.into_iter().map(|r| PostWithAuthor {
+    let posts: Vec<PostWithAuthor> = rows.into_iter().map(|r| PostWithAuthor {
         post: Post {
             id: r.id,
             author_id: r.author_id,
@@ -371,7 +442,9 @@ async fn get_feed(
         author_signing_key: r.author_signing_key,
     }).collect();
 
-    Ok(Json(posts))
+    let next_cursor = posts.last().map(|p| encode_cursor(&p.post.created_at, &p.post.id));
+
+    Ok(Json(PaginatedResponse { data: posts, next_cursor }))
 }
 
 // --- Chat ---
@@ -383,6 +456,18 @@ async fn create_conversation(
 ) -> Result<Json<Conversation>, AppError> {
     if body.participant_ids.is_empty() {
         return Err(AppError::BadRequest("Must include at least one participant".into()));
+    }
+
+    // Validate all participants exist
+    let existing_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM users WHERE id = ANY($1)"
+    )
+    .bind(&body.participant_ids)
+    .fetch_one(&state.db)
+    .await?;
+
+    if existing_count != body.participant_ids.len() as i64 {
+        return Err(AppError::BadRequest("One or more participants do not exist".into()));
     }
 
     let conv = sqlx::query_as::<_, Conversation>(
@@ -443,8 +528,8 @@ async fn get_messages(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(id): Path<Uuid>,
-    Query(params): Query<MessagesQuery>,
-) -> Result<Json<Vec<MessageWithSender>>, AppError> {
+    Query(params): Query<CursorQuery>,
+) -> Result<Json<PaginatedResponse<MessageWithSender>>, AppError> {
     // Verify user is a member
     let is_member = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2)"
@@ -459,7 +544,14 @@ async fn get_messages(
     }
 
     let limit = params.limit.unwrap_or(50).min(100);
-    let before = params.before.unwrap_or_else(|| chrono::Utc::now());
+
+    let (cursor_ts, cursor_id) = match &params.cursor {
+        Some(c) => {
+            let (ts, cid) = decode_cursor(c).map_err(|e| AppError::BadRequest(e))?;
+            (ts, Some(cid))
+        }
+        None => (chrono::Utc::now(), None),
+    };
 
     let messages = sqlx::query_as::<_, MessageWithSender>(
         r#"
@@ -467,18 +559,22 @@ async fn get_messages(
                u.username AS sender_username, u.is_bot AS sender_is_bot
         FROM messages m
         JOIN users u ON u.id = m.sender_id
-        WHERE m.conversation_id = $1 AND m.created_at < $2
-        ORDER BY m.created_at DESC
+        WHERE m.conversation_id = $1
+          AND (m.created_at, m.id) < ($2, COALESCE($4, '00000000-0000-0000-0000-000000000000'::uuid))
+        ORDER BY m.created_at DESC, m.id DESC
         LIMIT $3
         "#,
     )
     .bind(id)
-    .bind(before)
+    .bind(cursor_ts)
     .bind(limit)
+    .bind(cursor_id)
     .fetch_all(&state.db)
     .await?;
 
-    Ok(Json(messages))
+    let next_cursor = messages.last().map(|m| encode_cursor(&m.created_at, &m.id));
+
+    Ok(Json(PaginatedResponse { data: messages, next_cursor }))
 }
 
 // --- Uploads ---
@@ -521,15 +617,25 @@ async fn serve_upload(
     Ok(axum::response::Response::builder()
         .header("Content-Type", content_type)
         .header("Cache-Control", "public, max-age=31536000, immutable")
+        .header("X-Content-Type-Options", "nosniff")
         .body(axum::body::Body::from(data))
         .unwrap())
 }
 
 // --- WebSocket ---
 
+async fn create_ws_ticket(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let ticket = Uuid::new_v4().to_string();
+    state.ws_tickets.insert(ticket.clone(), (auth.user_id, auth.username.clone(), Instant::now()));
+    Ok(Json(serde_json::json!({ "ticket": ticket })))
+}
+
 #[derive(serde::Deserialize)]
 struct WsQuery {
-    token: String,
+    ticket: String,
 }
 
 async fn ws_handler(
@@ -537,9 +643,17 @@ async fn ws_handler(
     Query(query): Query<WsQuery>,
     ws: WebSocketUpgrade,
 ) -> Result<axum::response::Response, AppError> {
-    let claims = auth::verify_token(&query.token, &state.jwt_secret)?;
-    let user_id = claims.sub;
-    let username = claims.username;
+    let (user_id, username) = state
+        .ws_tickets
+        .remove(&query.ticket)
+        .and_then(|(_, (uid, uname, created_at))| {
+            if created_at.elapsed().as_secs() <= 30 {
+                Some((uid, uname))
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| AppError::Unauthorized("Invalid or expired ticket".into()))?;
 
     let is_bot = sqlx::query_scalar::<_, bool>("SELECT is_bot FROM users WHERE id = $1")
         .bind(user_id)
@@ -578,6 +692,13 @@ async fn handle_ws(socket: WebSocket, state: AppState, user_id: Uuid, username: 
                         }
                         WsClientMessage::Typing { conversation_id } => {
                             handle_typing(&state, user_id, &username, conversation_id).await;
+                        }
+                        WsClientMessage::VerifyIdentity { target_user_id } => {
+                            let msg = WsServerMessage::VerifyIdentity {
+                                from_user_id: user_id,
+                                from_username: username.clone(),
+                            };
+                            state.connections.send_to_user(target_user_id, &msg);
                         }
                     }
                 }
@@ -665,6 +786,20 @@ async fn handle_typing(
     username: &str,
     conversation_id: Uuid,
 ) {
+    // Verify membership
+    let is_member = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2)"
+    )
+    .bind(conversation_id)
+    .bind(user_id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(false);
+
+    if !is_member {
+        return;
+    }
+
     let members: Vec<Uuid> = sqlx::query_scalar(
         "SELECT user_id FROM conversation_members WHERE conversation_id = $1"
     )
@@ -715,7 +850,7 @@ fn validate_image_content_type(content_type: &str) -> Result<&'static str, Strin
 }
 
 fn validate_upload_filename(filename: &str) -> Result<(), String> {
-    if filename.contains('/') || filename.contains("..") {
+    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
         Err("Invalid filename".into())
     } else {
         Ok(())
@@ -765,7 +900,7 @@ async fn upload_key_bundle(
 ) -> Result<Json<serde_json::Value>, AppError> {
     // Upsert user's identity key, signed prekey, and optional signing key
     sqlx::query(
-        "UPDATE users SET identity_key = $1, signed_prekey = $2, signed_prekey_signature = $3, signed_prekey_id = $4, signing_key = COALESCE($6, signing_key) WHERE id = $5"
+        "UPDATE users SET identity_key = $1, signed_prekey = $2, signed_prekey_signature = COALESCE(NULLIF($3, ''), signed_prekey_signature), signed_prekey_id = $4, signing_key = COALESCE(NULLIF($6, ''), signing_key) WHERE id = $5"
     )
     .bind(&body.identity_key)
     .bind(&body.signed_prekey)
@@ -793,7 +928,7 @@ async fn upload_key_bundle(
 
 async fn get_key_bundle(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<PreKeyBundleResponse>, AppError> {
     let row = sqlx::query_as::<_, (String, String, String, i32)>(
@@ -804,13 +939,26 @@ async fn get_key_bundle(
     .await?
     .ok_or_else(|| AppError::NotFound("No key bundle for user".into()))?;
 
-    // Atomically pop one OPK
-    let opk = sqlx::query_as::<_, (i32, String)>(
-        "DELETE FROM prekeys WHERE id = (SELECT id FROM prekeys WHERE user_id = $1 LIMIT 1) RETURNING key_id, public_key"
+    // Only pop OPK if requester shares a conversation with the target
+    let shares_conversation = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM conversation_members cm1 JOIN conversation_members cm2 ON cm1.conversation_id = cm2.conversation_id WHERE cm1.user_id = $1 AND cm2.user_id = $2)"
     )
+    .bind(auth.user_id)
     .bind(user_id)
-    .fetch_optional(&state.db)
-    .await?;
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(false);
+
+    let opk = if shares_conversation {
+        sqlx::query_as::<_, (i32, String)>(
+            "DELETE FROM prekeys WHERE id = (SELECT id FROM prekeys WHERE user_id = $1 LIMIT 1) RETURNING key_id, public_key"
+        )
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await?
+    } else {
+        None
+    };
 
     Ok(Json(PreKeyBundleResponse {
         user_id,
@@ -864,6 +1012,52 @@ async fn get_conversation_members(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- ws_tickets ---
+
+    #[test]
+    fn ticket_creation_stores_entry() {
+        let tickets: dashmap::DashMap<String, (Uuid, String, std::time::Instant)> = dashmap::DashMap::new();
+        let ticket = Uuid::new_v4().to_string();
+        let user_id = Uuid::new_v4();
+        tickets.insert(ticket.clone(), (user_id, "alice".into(), std::time::Instant::now()));
+        assert!(tickets.contains_key(&ticket));
+        let entry = tickets.get(&ticket).unwrap();
+        assert_eq!(entry.0, user_id);
+        assert_eq!(entry.1, "alice");
+    }
+
+    #[test]
+    fn ticket_consumption_removes_entry() {
+        let tickets: dashmap::DashMap<String, (Uuid, String, std::time::Instant)> = dashmap::DashMap::new();
+        let ticket = Uuid::new_v4().to_string();
+        tickets.insert(ticket.clone(), (Uuid::new_v4(), "bob".into(), std::time::Instant::now()));
+        let removed = tickets.remove(&ticket);
+        assert!(removed.is_some());
+        assert!(!tickets.contains_key(&ticket));
+    }
+
+    #[test]
+    fn reused_ticket_is_rejected() {
+        let tickets: dashmap::DashMap<String, (Uuid, String, std::time::Instant)> = dashmap::DashMap::new();
+        let ticket = Uuid::new_v4().to_string();
+        tickets.insert(ticket.clone(), (Uuid::new_v4(), "carol".into(), std::time::Instant::now()));
+        let _ = tickets.remove(&ticket); // first use
+        let second = tickets.remove(&ticket); // reuse
+        assert!(second.is_none());
+    }
+
+    #[test]
+    fn expired_ticket_is_rejected() {
+        let tickets: dashmap::DashMap<String, (Uuid, String, std::time::Instant)> = dashmap::DashMap::new();
+        let ticket = Uuid::new_v4().to_string();
+        let expired = std::time::Instant::now() - std::time::Duration::from_secs(60);
+        tickets.insert(ticket.clone(), (Uuid::new_v4(), "dave".into(), expired));
+        let result = tickets.remove(&ticket).and_then(|(_, (uid, uname, created_at))| {
+            if created_at.elapsed().as_secs() <= 30 { Some((uid, uname)) } else { None }
+        });
+        assert!(result.is_none());
+    }
 
     // --- validate_image_content_type ---
 
