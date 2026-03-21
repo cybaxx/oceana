@@ -4,9 +4,9 @@ Tracking what's been built, what works, and what's next.
 
 ---
 
-## Current State: Phase 5 — E2E Encryption + Signed Posts
+## Current State: Phase 7 — Hardening
 
-**Status:** Full-stack app running in Docker. Backend API + SvelteKit frontend with Signal Protocol E2EE for chat and Ed25519 post signing.
+**Status:** Full-stack app running in Docker. Backend API + SvelteKit frontend with Signal Protocol E2EE for chat, Ed25519 post signing, rate limiting, security headers, and comprehensive test coverage (104 backend + 86 frontend + integration suite).
 
 ### What Exists
 
@@ -32,11 +32,12 @@ oceana/
 │   │   ├── 007_signal_keys.sql # Signal Protocol keys, prekeys, post signatures
 │   │   └── 999_seed.sql        # test data
 │   └── src/
-│       ├── main.rs             # Server startup, migration, router assembly
+│       ├── main.rs             # Server startup, migration, router, middleware
 │       ├── error.rs            # AppError enum → JSON error responses
-│       ├── models.rs           # DB rows, request/response structs, Signal types
-│       ├── chat.rs             # WebSocket connection manager
+│       ├── models.rs           # DB rows, request/response structs, pagination
+│       ├── chat.rs             # WebSocket connection manager (5 conn/user cap)
 │       ├── auth.rs             # JWT, Argon2id, AuthUser extractor
+│       ├── rate_limit.rs       # Per-IP rate limiter (DashMap)
 │       └── routes.rs           # All route handlers (REST + WS + Signal keys)
 └── frontend/
     ├── package.json            # includes @privacyresearch/libsignal-protocol-typescript
@@ -81,12 +82,13 @@ oceana/
 | `/api/v1/health` | GET | No | Done |
 | `/api/v1/auth/register` | POST | No | Done |
 | `/api/v1/auth/login` | POST | No | Done |
+| `/api/v1/users/search` | GET | Yes | Done (ILIKE search by username) |
 | `/api/v1/users/:id` | GET | No | Done |
 | `/api/v1/profile` | PUT | Yes | Done |
 | `/api/v1/users/:id/follow` | POST | Yes | Done |
 | `/api/v1/users/:id/follow` | DELETE | Yes | Done |
 | `/api/v1/posts` | POST | Yes | Done (accepts optional `signature`) |
-| `/api/v1/posts/:id` | GET | No | Done |
+| `/api/v1/posts/:id` | GET | Yes | Done (returns PostWithAuthor with reactions, replies, signature) |
 | `/api/v1/posts/:id` | DELETE | Yes | Done |
 | `/api/v1/posts/:id/react` | POST | Yes | Done (any emoji) |
 | `/api/v1/posts/:id/react` | DELETE | Yes | Done |
@@ -182,7 +184,7 @@ docker compose up --build -d
 ### Completed
 
 - [x] Post replies and threading
-- [x] Emoji reactions (any emoji)
+- [x] Emoji reactions (any emoji, including 👍 likes and 😬 yikes)
 - [x] Image uploads and display
 - [x] Bot/human user distinction
 - [x] WebSocket real-time chat
@@ -192,27 +194,45 @@ docker compose up --build -d
 - [x] Key bundle management (upload, fetch, OPK rotation)
 - [x] Ed25519 post signing + verification badges
 - [x] Auto-logout on expired JWT
+- [x] User search endpoint (`GET /users/search?q=`)
+- [x] Cursor-based pagination (feed + replies)
+- [x] Key verification UI (safety numbers modal)
+- [x] Group chat E2EE (AES-256-GCM with group key distribution)
+- [x] Typing indicators in chat UI
+- [x] Rate limiting per endpoint (auth: 5/min, uploads: 10/min, general: 60/min)
+- [x] Content Security Policy headers
+- [x] WS ticket-based auth (short-lived one-time tickets)
+- [x] Post detail page with replies, reactions, and signature verification
+- [x] Markdown rendering (headers, bold, italic, blockquotes, code blocks, lists)
+- [x] Bot activity script with signed posts, local test images, full API coverage
+- [x] Reaction removal and re-reaction support
 
 ### Remaining
 
-- [ ] Follower/following counts on profile
-- [ ] User search endpoint
-- [ ] Cursor-based pagination (currently offset-based)
-- [ ] Typing indicators in chat UI
-- [ ] Key verification UI (safety numbers)
-- [ ] Group chat E2EE (currently encrypts per-recipient)
+**Quick wins:**
+- [ ] Follower/following list pages (counts work, but can't view actual lists)
+- [ ] Profile avatar/banner image upload UI
+- [ ] Post editing (only delete supported)
+- [ ] Conversation naming for group chats
+
+**Security:**
+- [ ] Fix silent encryption fallback (sends plaintext when E2EE fails)
+- [ ] Remove plaintext message column or enforce E2EE-only
+- [ ] WS message content length validation and rate limiting
+- [ ] Group key rotation on membership changes
+- [ ] Token refresh/revocation
+- [ ] Password max length cap
+
+**Infrastructure:**
+- [ ] CI pipeline
+- [ ] Redis pub/sub for multi-instance WebSocket
+- [ ] MinIO object storage (replace local /uploads)
 
 ### Phase 6: Graph Database
 
 - [ ] Neo4j integration
 - [ ] Friend-of-friend recommendations
 - [ ] Community detection
-
-### Phase 7: Hardening
-
-- [ ] Rate limiting per endpoint
-- [ ] Content Security Policy headers
-- [ ] Redis pub/sub for multi-instance WebSocket
 
 ---
 

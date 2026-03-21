@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Comprehensive smoke test for Oceana API
-# Requires: curl, jq, running server on :3000, running postgres
+# Requires: curl, jq, running server on :5173 (frontend proxy) or :3001 (direct)
 set -euo pipefail
 
 BASE="http://localhost:5173/api/v1"
 PASS="password123"
+FAILURES=0
 
 c() { curl -sf "$@"; }
 cj() { curl -sf "$@" | jq .; }
@@ -12,11 +13,39 @@ post_json() {
   local token="$1" path="$2" body="$3"
   c -X POST "$BASE$path" -H "Content-Type: application/json" -H "Authorization: Bearer $token" -d "$body"
 }
+put_json() {
+  local token="$1" path="$2" body="$3"
+  c -X PUT "$BASE$path" -H "Content-Type: application/json" -H "Authorization: Bearer $token" -d "$body"
+}
+get_auth() {
+  local token="$1" path="$2"
+  c "$BASE$path" -H "Authorization: Bearer $token"
+}
+delete_auth() {
+  local token="$1" path="$2"
+  c -X DELETE "$BASE$path" -H "Authorization: Bearer $token"
+}
 
 section() { echo -e "\n\033[1;36m=== $1 ===\033[0m"; }
+pass()    { echo -e "  \033[32m✓ $1\033[0m"; }
+fail()    { echo -e "  \033[31m✗ $1\033[0m"; FAILURES=$((FAILURES + 1)); }
+assert_eq() {
+  local actual="$1" expected="$2" label="$3"
+  if [ "$actual" = "$expected" ]; then pass "$label"; else fail "$label (expected '$expected', got '$actual')"; fi
+}
+assert_gt() {
+  local actual="$1" min="$2" label="$3"
+  if [ "$actual" -gt "$min" ] 2>/dev/null; then pass "$label"; else fail "$label (expected >$min, got '$actual')"; fi
+}
+assert_not_empty() {
+  local actual="$1" label="$2"
+  if [ -n "$actual" ] && [ "$actual" != "null" ]; then pass "$label"; else fail "$label (was empty/null)"; fi
+}
 
 # ─── Register / login users ───────────────────────────────────────────────────
-section "Register users"
+section "Register & Login"
+
+TS=$(date +%s)
 
 register() {
   local user="$1" email="$2"
@@ -28,43 +57,72 @@ register() {
   echo "$res"
 }
 
-TS=$(date +%s)
-
 ALICE_JSON=$(register "alice$TS" "alice$TS@oceana.io")
 ALICE_TOKEN=$(echo "$ALICE_JSON" | jq -r .token)
 ALICE_ID=$(echo "$ALICE_JSON" | jq -r .user.id)
-echo "alice  => $ALICE_ID"
+assert_not_empty "$ALICE_TOKEN" "alice login token"
+assert_not_empty "$ALICE_ID" "alice user id"
 
 BOB_JSON=$(register "bob$TS" "bob$TS@oceana.io")
 BOB_TOKEN=$(echo "$BOB_JSON" | jq -r .token)
 BOB_ID=$(echo "$BOB_JSON" | jq -r .user.id)
-echo "bob    => $BOB_ID"
+assert_not_empty "$BOB_TOKEN" "bob login token"
 
 CORAL_JSON=$(register "coral$TS" "coral$TS@oceana.io")
 CORAL_TOKEN=$(echo "$CORAL_JSON" | jq -r .token)
 CORAL_ID=$(echo "$CORAL_JSON" | jq -r .user.id)
-echo "coral  => $CORAL_ID"
 
 DEPTH_JSON=$(register "depth$TS" "depth$TS@oceana.io")
 DEPTH_TOKEN=$(echo "$DEPTH_JSON" | jq -r .token)
 DEPTH_ID=$(echo "$DEPTH_JSON" | jq -r .user.id)
-echo "depth  => $DEPTH_ID"
+
+echo "  registered 4 users: alice, bob, coral, depth"
+
+# ─── Registration validation ─────────────────────────────────────────────────
+section "Registration Validation"
+
+# Too short username
+SHORT_RES=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"ab\",\"email\":\"short$TS@test.io\",\"password\":\"$PASS\"}")
+assert_eq "$SHORT_RES" "400" "rejects username < 3 chars"
+
+# Too short password
+WEAK_RES=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"weakpw$TS\",\"email\":\"weak$TS@test.io\",\"password\":\"short\"}")
+assert_eq "$WEAK_RES" "400" "rejects password < 8 chars"
 
 # ─── Update profiles ──────────────────────────────────────────────────────────
 section "Update profiles"
 
-put_json() {
-  local token="$1" path="$2" body="$3"
-  c -X PUT "$BASE$path" -H "Content-Type: application/json" -H "Authorization: Bearer $token" -d "$body"
-}
+ALICE_PROFILE=$(put_json "$ALICE_TOKEN" "/profile" '{"display_name":"Alice Abyss","bio":"jellyfish whisperer"}')
+ALICE_DN=$(echo "$ALICE_PROFILE" | jq -r .display_name)
+assert_eq "$ALICE_DN" "Alice Abyss" "alice profile display_name"
 
-put_json "$ALICE_TOKEN" "/profile" '{"display_name":"Alice Abyss","bio":"jellyfish whisperer 🪼 // deep-sea cryptographer"}' | jq .display_name
-put_json "$BOB_TOKEN" "/profile" '{"display_name":"Bob Bioluminescent","bio":"hacking the ocean floor 🌊 // rave @ the trench"}' | jq .display_name
-put_json "$CORAL_TOKEN" "/profile" '{"display_name":"Coral Cipher","bio":"music + math + marine biology 🎵🔐"}' | jq .display_name
-put_json "$DEPTH_TOKEN" "/profile" '{"display_name":"Depth Charge","bio":"bass drops below sea level 🫧⚡"}' | jq .display_name
+put_json "$BOB_TOKEN" "/profile" '{"display_name":"Bob Bioluminescent","bio":"ocean hacker"}' > /dev/null
+put_json "$CORAL_TOKEN" "/profile" '{"display_name":"Coral Cipher","bio":"music + crypto"}' > /dev/null
+put_json "$DEPTH_TOKEN" "/profile" '{"display_name":"Depth Charge","bio":"bass drops below sea level"}' > /dev/null
+pass "4 profiles updated"
 
-# ─── Everyone follows everyone ────────────────────────────────────────────────
-section "Everyone follows everyone"
+# ─── Get user profile ─────────────────────────────────────────────────────────
+section "Get user profile"
+
+USER_JSON=$(c "$BASE/users/$ALICE_ID")
+USER_NAME=$(echo "$USER_JSON" | jq -r .username)
+assert_eq "$USER_NAME" "alice$TS" "GET /users/:id returns correct username"
+
+# ─── User search ──────────────────────────────────────────────────────────────
+section "User search"
+
+SEARCH_COUNT=$(get_auth "$ALICE_TOKEN" "/users/search?q=alice$TS" | jq 'length')
+assert_gt "$SEARCH_COUNT" "0" "search for alice returns results"
+
+SEARCH_EMPTY=$(get_auth "$ALICE_TOKEN" "/users/search?q=zzz_nonexistent_zzz" | jq 'length')
+assert_eq "$SEARCH_EMPTY" "0" "search for nonexistent returns 0"
+
+# ─── Follows ──────────────────────────────────────────────────────────────────
+section "Follow mesh"
 
 follow() {
   local token="$1" target="$2"
@@ -73,175 +131,248 @@ follow() {
 
 for token_var in ALICE_TOKEN BOB_TOKEN CORAL_TOKEN DEPTH_TOKEN; do
   for id_var in ALICE_ID BOB_ID CORAL_ID DEPTH_ID; do
-    token="${!token_var}"
-    target="${!id_var}"
-    follow "$token" "$target"
+    follow "${!token_var}" "${!id_var}"
   done
 done
-echo "All follow relationships created"
+pass "full follow mesh created"
 
-# ─── Posts: themed content ─────────────────────────────────────────────────────
+# ─── Posts ────────────────────────────────────────────────────────────────────
 section "Create posts"
 
 mk_post() {
   local token="$1" content="$2"
-  local res
-  res=$(post_json "$token" "/posts" "{\"content\":$(echo "$content" | jq -Rs .)}")
-  echo "$res" | jq -r '.id'
+  post_json "$token" "/posts" "{\"content\":$(echo "$content" | jq -Rs .)}" | jq -r '.id'
 }
 
-# Jellyfish
-P1=$(mk_post "$ALICE_TOKEN" "Moon jellyfish have no brain, no heart, no blood — and they've survived for 500 million years. Maybe simplicity is the ultimate sophistication. 🪼")
-echo "post $P1 (jellyfish)"
+mk_signed_post() {
+  local token="$1" content="$2" sig="$3"
+  post_json "$token" "/posts" "{\"content\":$(echo "$content" | jq -Rs .),\"signature\":\"$sig\"}" | jq -r '.id'
+}
 
-# Ocean
-P2=$(mk_post "$BOB_TOKEN" "The Mariana Trench is 36,000 feet deep. At that pressure, sound travels 4x faster than on land. Imagine a rave down there 🌊🔊")
-echo "post $P2 (ocean/rave)"
+P1=$(mk_post "$ALICE_TOKEN" "Moon jellyfish have no brain — and they've survived for 500 million years. 🪼")
+assert_not_empty "$P1" "post 1 created"
 
-# Hacking
-P3=$(mk_post "$CORAL_TOKEN" "Just found a side-channel timing attack in the key exchange protocol. The fix? Add constant-time comparison + random delay jitter. Never trust \`memcmp\` for secrets. 🔐")
-echo "post $P3 (hacking)"
+P2=$(mk_post "$BOB_TOKEN" "The Mariana Trench is 36,000 feet deep. Imagine a rave down there 🌊🔊")
+assert_not_empty "$P2" "post 2 created"
 
-# Music
-P4=$(mk_post "$DEPTH_TOKEN" "New mix dropping tonight — 140bpm liquid DnB meets underwater field recordings. Hydrophones in the Pacific captured whale song at 52Hz. That's your sub-bass right there 🎵🐋")
-echo "post $P4 (music)"
+P3=$(mk_post "$CORAL_TOKEN" "Side-channel timing attack in the key exchange protocol. Never trust memcmp for secrets. 🔐")
+assert_not_empty "$P3" "post 3 created"
 
-# Cryptography
-P5=$(mk_post "$ALICE_TOKEN" "Ed25519 is beautiful: 32-byte keys, deterministic signatures, no random nonce needed. Curve25519 was chosen because \`2^255 - 19\` is prime. Elegance in every bit.")
-echo "post $P5 (cryptography)"
+P4=$(mk_post "$DEPTH_TOKEN" "New mix: 140bpm liquid DnB meets underwater field recordings. 🎵🐋")
+assert_not_empty "$P4" "post 4 created"
 
-# Rave culture
-P6=$(mk_post "$BOB_TOKEN" "PLUR isn't dead, it just went underground — literally. Submarine rave last weekend: waterproof speakers, glow-in-the-dark plankton as the light show, and zero noise complaints 🫧⚡")
-echo "post $P6 (rave)"
+P5=$(mk_post "$ALICE_TOKEN" "Ed25519 is beautiful: 32-byte keys, deterministic signatures. Elegance in every bit.")
+P6=$(mk_post "$BOB_TOKEN" "PLUR isn't dead, it just went underground — literally. Submarine rave last weekend. 🫧⚡")
+P7=$(mk_post "$CORAL_TOKEN" "Octopi can edit their own RNA on the fly. Nature invented self-modifying code. 🐙💻")
+P8=$(mk_post "$DEPTH_TOKEN" "Zero-knowledge proofs for music royalties. Privacy-preserving patronage. 🎵🔐")
+P9=$(mk_post "$ALICE_TOKEN" "## Markdown Test\n\n**Bold** and *italic*. A list:\n- item 1\n- item 2\n\n> blockquote")
+P10=$(mk_post "$BOB_TOKEN" "Undersea fiber optic cables carry 99% of intercontinental internet traffic. 🌊🔒")
 
-# Mixed: ocean + hacking
-P7=$(mk_post "$CORAL_TOKEN" "Octopi can edit their own RNA on the fly to adapt to cold water. Nature invented self-modifying code 400 million years before we did. 🐙💻")
-echo "post $P7 (ocean/hacking)"
+pass "10 posts created"
 
-# Mixed: music + crypto
-P8=$(mk_post "$DEPTH_TOKEN" "What if we used zero-knowledge proofs for music royalties? Prove you streamed the track without revealing your identity. Privacy-preserving patronage. 🎵🔐")
-echo "post $P8 (music/crypto)"
+# ─── Signed post ──────────────────────────────────────────────────────────────
+section "Signed post"
 
-# Jellyfish + rave
-P9=$(mk_post "$ALICE_TOKEN" "Bioluminescent jellyfish at 3am in the deep ocean is nature's own laser show. GFP (green fluorescent protein) won a Nobel Prize. The jellyfish didn't get credit. 🪼✨")
-echo "post $P9 (jellyfish/rave)"
+P_SIGNED=$(mk_signed_post "$ALICE_TOKEN" "This post is signed with Ed25519" "dGVzdHNpZ25hdHVyZQ==")
+assert_not_empty "$P_SIGNED" "signed post created"
 
-# Hacking + ocean
-P10=$(mk_post "$BOB_TOKEN" "Undersea fiber optic cables carry 99% of intercontinental internet traffic. The ocean floor is the real backbone of cyberspace. Guard those cables. 🌊🔒")
-echo "post $P10 (hacking/ocean)"
+SIGNED_POST_JSON=$(get_auth "$ALICE_TOKEN" "/posts/$P_SIGNED")
+POST_SIG=$(echo "$SIGNED_POST_JSON" | jq -r '.signature')
+assert_eq "$POST_SIG" "dGVzdHNpZ25hdHVyZQ==" "signed post has signature in response"
 
-# ─── Comments / replies ───────────────────────────────────────────────────────
-section "Comments"
+# ─── Get single post ─────────────────────────────────────────────────────────
+section "Get single post"
+
+POST_JSON=$(get_auth "$ALICE_TOKEN" "/posts/$P1")
+POST_AUTHOR=$(echo "$POST_JSON" | jq -r '.author_username')
+assert_eq "$POST_AUTHOR" "alice$TS" "GET /posts/:id returns PostWithAuthor"
+
+POST_REPLY_COUNT=$(echo "$POST_JSON" | jq -r '.reply_count')
+assert_eq "$POST_REPLY_COUNT" "0" "new post has 0 replies"
+
+# ─── Comments / replies ──────────────────────────────────────────────────────
+section "Replies"
 
 reply() {
   local token="$1" parent="$2" content="$3"
   post_json "$token" "/posts" "{\"content\":$(echo "$content" | jq -Rs .),\"parent_id\":\"$parent\"}" | jq -r .id
 }
 
-reply "$BOB_TOKEN" "$P1" "No brain gang 🧠❌ — honestly the jellyfish lifestyle sounds peaceful"
-reply "$CORAL_TOKEN" "$P1" "Fun fact: box jellyfish have 24 eyes. No brain but 24 eyes. Evolution is wild."
+R1=$(reply "$BOB_TOKEN" "$P1" "No brain gang — the jellyfish lifestyle sounds peaceful")
+assert_not_empty "$R1" "reply 1 created"
 
-reply "$ALICE_TOKEN" "$P2" "36,000 feet of water pressure would make your bass drops hit DIFFERENT"
-reply "$DEPTH_TOKEN" "$P2" "I've actually been researching underwater acoustics for a live set. Not joking."
+R2=$(reply "$CORAL_TOKEN" "$P1" "Box jellyfish have 24 eyes. No brain but 24 eyes.")
+reply "$ALICE_TOKEN" "$P2" "36,000 feet of water pressure would make bass drops hit different" > /dev/null
+reply "$DEPTH_TOKEN" "$P3" "This is why I use libsodium for everything" > /dev/null
 
-reply "$DEPTH_TOKEN" "$P3" "This is why I use libsodium for everything. Constant-time by default."
-reply "$ALICE_TOKEN" "$P3" "The timing oracle is always watching 👁️"
+# Nested reply (reply to reply)
+R3=$(reply "$ALICE_TOKEN" "$R1" "Honestly, floating around with no responsibilities sounds ideal")
+assert_not_empty "$R3" "nested reply created (reply-to-reply)"
 
-reply "$CORAL_TOKEN" "$P4" "52Hz whale is the loneliest whale in the ocean. Nobody else can hear its frequency. 😢"
-reply "$BOB_TOKEN" "$P4" "Drop that mix link when it's ready, need new material for the submarine set"
+pass "5 replies created (including nested)"
 
-reply "$BOB_TOKEN" "$P5" "Curve25519 is DJB's gift to humanity. Clean math, clean code."
-reply "$DEPTH_TOKEN" "$P5" "The fact that the prime is so close to a power of 2 makes modular reduction insanely fast"
+# ─── Verify replies endpoint ──────────────────────────────────────────────────
+section "Verify replies"
 
-reply "$ALICE_TOKEN" "$P6" "Glow-in-the-dark plankton light show sounds unreal. Dinoflagellates?"
-reply "$CORAL_TOKEN" "$P6" "PLUR + marine conservation = the crossover event nobody expected"
+REPLY_DATA=$(get_auth "$ALICE_TOKEN" "/posts/$P1/replies")
+REPLY_COUNT=$(echo "$REPLY_DATA" | jq '.data | length')
+assert_eq "$REPLY_COUNT" "2" "P1 has 2 direct replies"
 
-echo "All comments posted"
+# Check reply has author info
+REPLY_AUTHOR=$(echo "$REPLY_DATA" | jq -r '.data[0].author_username')
+assert_not_empty "$REPLY_AUTHOR" "reply includes author_username"
 
-# ─── Reactions ─────────────────────────────────────────────────────────────────
-section "Reactions (likes, yikes, emojis)"
+# ─── Reactions ────────────────────────────────────────────────────────────────
+section "Reactions (likes, yikes, emoji)"
 
 react() {
   local token="$1" post_id="$2" emoji="$3"
   post_json "$token" "/posts/$post_id/react" "{\"kind\":\"$emoji\"}" > /dev/null
 }
 
-# Likes (👍) on various posts
+# Likes (👍)
 react "$BOB_TOKEN" "$P1" "👍"
 react "$CORAL_TOKEN" "$P1" "👍"
 react "$DEPTH_TOKEN" "$P1" "👍"
-
 react "$ALICE_TOKEN" "$P2" "👍"
-react "$CORAL_TOKEN" "$P2" "👍"
-
-react "$ALICE_TOKEN" "$P4" "👍"
-react "$BOB_TOKEN" "$P4" "👍"
+pass "4 likes applied"
 
 # Yikes (😬)
 react "$DEPTH_TOKEN" "$P6" "😬"
+pass "1 yikes applied"
 
-# Fire
+# Various emoji
 react "$ALICE_TOKEN" "$P3" "🔥"
 react "$BOB_TOKEN" "$P3" "🔥"
-react "$DEPTH_TOKEN" "$P3" "🔥"
-
-# Brain
 react "$CORAL_TOKEN" "$P5" "🧠"
-react "$BOB_TOKEN" "$P5" "🧠"
-
-# Ocean wave
-react "$ALICE_TOKEN" "$P10" "🌊"
-react "$CORAL_TOKEN" "$P10" "🌊"
-react "$DEPTH_TOKEN" "$P10" "🌊"
-
-# Music note
-react "$ALICE_TOKEN" "$P8" "🎵"
-react "$CORAL_TOKEN" "$P8" "🎵"
-
-# Skull (impressed)
 react "$BOB_TOKEN" "$P7" "💀"
-react "$DEPTH_TOKEN" "$P7" "💀"
-
-# Sparkle
-react "$BOB_TOKEN" "$P9" "✨"
-react "$CORAL_TOKEN" "$P9" "✨"
 react "$DEPTH_TOKEN" "$P9" "✨"
+pass "5 emoji reactions applied"
 
-echo "All reactions applied"
+# Verify reactions on post
+REACT_JSON=$(get_auth "$ALICE_TOKEN" "/posts/$P1/reactions")
+REACT_COUNT=$(echo "$REACT_JSON" | jq '.reactions | length')
+assert_gt "$REACT_COUNT" "0" "P1 has reactions"
 
-# ─── Chat conversations ───────────────────────────────────────────────────────
-section "Create chat conversations"
+# ─── Reaction removal & update ───────────────────────────────────────────────
+section "Reaction removal & update"
+
+# Remove bob's like on P1
+delete_auth "$BOB_TOKEN" "/posts/$P1/react" > /dev/null
+pass "bob unreacted from P1"
+
+# Re-react with different emoji
+react "$BOB_TOKEN" "$P1" "🌊"
+pass "bob re-reacted with 🌊"
+
+# Verify the change
+REACT_JSON2=$(get_auth "$BOB_TOKEN" "/posts/$P1/reactions")
+BOB_REACTION=$(echo "$REACT_JSON2" | jq -r '.user_reaction')
+assert_eq "$BOB_REACTION" "🌊" "bob's reaction changed to 🌊"
+
+# ─── Post deletion ───────────────────────────────────────────────────────────
+section "Post deletion"
+
+P_DELETE=$(mk_post "$ALICE_TOKEN" "This post will be deleted")
+assert_not_empty "$P_DELETE" "deletable post created"
+
+DELETE_RES=$(delete_auth "$ALICE_TOKEN" "/posts/$P_DELETE")
+DELETE_STATUS=$(echo "$DELETE_RES" | jq -r '.status')
+assert_eq "$DELETE_STATUS" "deleted" "post deletion returns status=deleted"
+
+# Verify it's gone
+DELETE_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/posts/$P_DELETE" -H "Authorization: Bearer $ALICE_TOKEN")
+assert_eq "$DELETE_CHECK" "404" "deleted post returns 404"
+
+# Can't delete someone else's post
+NOAUTH_DEL=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$BASE/posts/$P2" -H "Authorization: Bearer $ALICE_TOKEN")
+assert_eq "$NOAUTH_DEL" "404" "can't delete someone else's post"
+
+# ─── Feed ─────────────────────────────────────────────────────────────────────
+section "Feed"
+
+FEED_JSON=$(get_auth "$ALICE_TOKEN" "/feed")
+FEED_COUNT=$(echo "$FEED_JSON" | jq '.data | length')
+assert_gt "$FEED_COUNT" "0" "alice feed has posts"
+
+# Check feed returns PostWithAuthor fields
+FIRST_POST=$(echo "$FEED_JSON" | jq '.data[0]')
+assert_not_empty "$(echo "$FIRST_POST" | jq -r '.author_username')" "feed post has author_username"
+assert_not_empty "$(echo "$FIRST_POST" | jq -r '.reaction_counts')" "feed post has reaction_counts"
+
+# Feed pagination
+NEXT_CURSOR=$(echo "$FEED_JSON" | jq -r '.next_cursor // empty')
+if [ -n "$NEXT_CURSOR" ]; then
+  PAGE2_COUNT=$(get_auth "$ALICE_TOKEN" "/feed?cursor=$NEXT_CURSOR" | jq '.data | length')
+  pass "pagination: page 2 has $PAGE2_COUNT posts"
+else
+  pass "pagination: all posts fit in one page (no next_cursor)"
+fi
+
+# ─── Chat conversations ─────────────────────────────────────────────────────
+section "Chat"
 
 CONV1=$(post_json "$ALICE_TOKEN" "/chats" "{\"participant_ids\":[\"$BOB_ID\"]}" | jq -r .id)
-echo "alice <-> bob conversation: $CONV1"
+assert_not_empty "$CONV1" "1:1 conversation created"
 
-CONV2=$(post_json "$CORAL_TOKEN" "/chats" "{\"participant_ids\":[\"$DEPTH_ID\"]}" | jq -r .id)
-echo "coral <-> depth conversation: $CONV2"
+CONV2=$(post_json "$ALICE_TOKEN" "/chats" "{\"participant_ids\":[\"$BOB_ID\",\"$CORAL_ID\",\"$DEPTH_ID\"]}" | jq -r .id)
+assert_not_empty "$CONV2" "group conversation created"
 
-CONV3=$(post_json "$ALICE_TOKEN" "/chats" "{\"participant_ids\":[\"$BOB_ID\",\"$CORAL_ID\",\"$DEPTH_ID\"]}" | jq -r .id)
-echo "group chat (all four): $CONV3"
+# List conversations
+CONV_COUNT=$(get_auth "$ALICE_TOKEN" "/chats" | jq 'length')
+assert_gt "$CONV_COUNT" "0" "alice has conversations"
 
-# ─── Verify feed ──────────────────────────────────────────────────────────────
-section "Verify feed"
+# Get conversation members
+MEMBERS=$(get_auth "$ALICE_TOKEN" "/chats/$CONV2/members" | jq 'length')
+assert_eq "$MEMBERS" "4" "group chat has 4 members"
 
-FEED_COUNT=$(c "$BASE/feed" -H "Authorization: Bearer $ALICE_TOKEN" | jq length)
-echo "Alice's feed has $FEED_COUNT posts"
+# ─── Key bundle ───────────────────────────────────────────────────────────────
+section "Key bundle"
 
-# ─── Verify reactions on a post ───────────────────────────────────────────────
-section "Verify reactions on jellyfish post"
+BUNDLE_RES=$(put_json "$ALICE_TOKEN" "/keys/bundle" "{
+  \"identity_key\": \"dGVzdGlkZW50aXR5a2V5\",
+  \"signed_prekey\": \"dGVzdHNpZ25lZHByZWtleQ==\",
+  \"signed_prekey_signature\": \"dGVzdHNpZw==\",
+  \"signed_prekey_id\": 1,
+  \"one_time_prekeys\": [{\"key_id\": 1, \"public_key\": \"b3BrMQ==\"}],
+  \"signing_key\": \"c2lnbmluZ2tleQ==\"
+}")
+pass "key bundle uploaded"
 
-cj "$BASE/posts/$P1/reactions" -H "Authorization: Bearer $ALICE_TOKEN"
+KEY_COUNT=$(get_auth "$ALICE_TOKEN" "/keys/count" | jq -r '.count')
+assert_gt "$KEY_COUNT" "-1" "key count endpoint works"
 
-# ─── Verify replies ───────────────────────────────────────────────────────────
-section "Verify replies on hacking post"
+BUNDLE_FETCH=$(get_auth "$BOB_TOKEN" "/keys/bundle/$ALICE_ID")
+FETCH_IK=$(echo "$BUNDLE_FETCH" | jq -r '.identity_key')
+assert_eq "$FETCH_IK" "dGVzdGlkZW50aXR5a2V5" "fetched bundle has correct identity_key"
 
-REPLY_COUNT=$(c "$BASE/posts/$P3/replies" -H "Authorization: Bearer $ALICE_TOKEN" | jq length)
-echo "Hacking post has $REPLY_COUNT replies"
+# ─── Image upload ─────────────────────────────────────────────────────────────
+section "Image upload"
 
-# ─── List conversations ───────────────────────────────────────────────────────
-section "List alice's conversations"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/scripts/images/jellyfish.png" ]; then
+  IMG_URL=$(curl -sf "$BASE/upload" -H "Authorization: Bearer $ALICE_TOKEN" \
+    -F "file=@$SCRIPT_DIR/scripts/images/jellyfish.png;type=image/png" | jq -r '.url')
+  assert_not_empty "$IMG_URL" "image uploaded successfully"
+elif [ -f "$SCRIPT_DIR/images/jellyfish.png" ]; then
+  IMG_URL=$(curl -sf "$BASE/upload" -H "Authorization: Bearer $ALICE_TOKEN" \
+    -F "file=@$SCRIPT_DIR/images/jellyfish.png;type=image/png" | jq -r '.url')
+  assert_not_empty "$IMG_URL" "image uploaded successfully"
+else
+  pass "skipped image upload (no test images found)"
+fi
 
-CONV_COUNT=$(c "$BASE/chats" -H "Authorization: Bearer $ALICE_TOKEN" | jq length)
-echo "Alice has $CONV_COUNT conversations"
+# ─── Health check ─────────────────────────────────────────────────────────────
+section "Health check"
 
-section "All tests passed ✓"
+HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/health")
+assert_eq "$HEALTH_STATUS" "200" "health endpoint returns 200"
+
+# ─── Summary ──────────────────────────────────────────────────────────────────
+echo ""
+if [ "$FAILURES" -gt 0 ]; then
+  echo -e "\033[31m✗ $FAILURES test(s) failed\033[0m"
+  exit 1
+else
+  echo -e "\033[32m✓ All tests passed\033[0m"
+fi

@@ -171,6 +171,6 @@ CREATE TABLE prekeys (
 | `006_emoji_reactions.sql` | Drops CHECK constraint, allows any emoji |
 | `007_signal_keys.sql` | Signal Protocol fields on users, prekeys table, post signature, message_type |
 | `008_signing_key.sql` | Adds `signing_key` to users for Ed25519 |
-| `999_seed.sql` | Test data (only runs when `SEED_DATA=true`) |
+| `999_seed.sql` | Test data (only runs when `SEED_DATA=true` env var is set) |
 
-Migrations are idempotent — they use `IF NOT EXISTS` and `ON CONFLICT` patterns. Errors are logged but don't halt startup.
+Migrations are idempotent — they use `IF NOT EXISTS` and `ON CONFLICT` patterns. Errors are logged (via `tracing::warn!`) but don't halt startup. Each migration file is split by `;` and each statement is executed individually (sqlx doesn't support multi-statement queries).

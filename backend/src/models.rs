@@ -431,6 +431,85 @@ mod tests {
     }
 
     #[test]
+    fn create_post_request_with_signature() {
+        let json = r#"{"content":"signed post","signature":"base64sig=="}"#;
+        let req: CreatePostRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.content, "signed post");
+        assert_eq!(req.signature.unwrap(), "base64sig==");
+        assert!(req.parent_id.is_none());
+    }
+
+    #[test]
+    fn create_post_request_signed_reply() {
+        let json = r#"{"content":"reply","parent_id":"550e8400-e29b-41d4-a716-446655440000","signature":"sig=="}"#;
+        let req: CreatePostRequest = serde_json::from_str(json).unwrap();
+        assert!(req.parent_id.is_some());
+        assert!(req.signature.is_some());
+    }
+
+    #[test]
+    fn post_with_author_includes_signing_key() {
+        let post = Post {
+            id: Uuid::new_v4(),
+            author_id: Uuid::new_v4(),
+            content: "signed".into(),
+            parent_id: None,
+            signature: Some("sig==".into()),
+            created_at: Utc::now(),
+        };
+        let pwa = PostWithAuthor {
+            post,
+            author_username: "alice".into(),
+            author_display_name: None,
+            author_is_bot: false,
+            reaction_counts: serde_json::json!([]),
+            user_reaction: None,
+            reply_count: 5,
+            author_signing_key: Some("pubkey==".into()),
+        };
+        let json = serde_json::to_value(&pwa).unwrap();
+        assert_eq!(json["signature"], "sig==");
+        assert_eq!(json["author_signing_key"], "pubkey==");
+        assert_eq!(json["reply_count"], 5);
+    }
+
+    #[test]
+    fn paginated_response_serializes() {
+        let resp = PaginatedResponse {
+            data: vec!["a".to_string(), "b".to_string()],
+            next_cursor: Some("cursor123".into()),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["data"][0], "a");
+        assert_eq!(json["data"][1], "b");
+        assert_eq!(json["next_cursor"], "cursor123");
+    }
+
+    #[test]
+    fn paginated_response_null_cursor() {
+        let resp: PaginatedResponse<String> = PaginatedResponse {
+            data: vec![],
+            next_cursor: None,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert!(json["data"].as_array().unwrap().is_empty());
+        assert!(json["next_cursor"].is_null());
+    }
+
+    #[test]
+    fn user_search_result_serializes() {
+        let r = UserSearchResult {
+            id: Uuid::new_v4(),
+            username: "nautilus".into(),
+            display_name: Some("Nautilus".into()),
+            is_bot: true,
+        };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["username"], "nautilus");
+        assert_eq!(json["is_bot"], true);
+    }
+
+    #[test]
     fn cursor_query_deserializes_with_defaults() {
         let json = r#"{}"#;
         let q: CursorQuery = serde_json::from_str(json).unwrap();

@@ -84,6 +84,8 @@ After session establishment, every message uses the Double Ratchet algorithm:
 |-----------|------|
 | Key generation & bundle upload | `frontend/src/lib/crypto/keys.ts` |
 | X3DH session init, encrypt, decrypt | `frontend/src/lib/crypto/signal.ts` |
+| Group key management (AES-256-GCM) | `frontend/src/lib/crypto/groupkeys.ts` |
+| Safety number / fingerprint generation | `frontend/src/lib/crypto/fingerprint.ts` |
 | IndexedDB key store | `frontend/src/lib/crypto/store.ts` |
 | Singleton init & orchestration | `frontend/src/lib/crypto/index.ts` |
 | Chat store with E2EE integration | `frontend/src/lib/stores/chat.ts` |
@@ -131,7 +133,7 @@ Posts can be cryptographically signed to prove authorship.
 | Server never sees plaintext (E2EE) | Implemented |
 | Forward secrecy via Double Ratchet | Implemented |
 | OPK exhaustion protection | Implemented (conversation-gated) |
-| Key verification / safety numbers | Not yet implemented |
-| Key change warnings | Not yet implemented |
-| Group chat E2EE | Per-recipient encryption (no Sender Keys yet) |
+| Key verification / safety numbers | Implemented (fingerprint comparison modal) |
+| Key change warnings | Implemented (TOFU with stored identity keys) |
+| Group chat E2EE | Implemented (AES-256-GCM with group key distribution) |
 | JWT stored in localStorage | XSS risk — migrate to httpOnly cookies for production |

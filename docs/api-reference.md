@@ -20,6 +20,8 @@ Returns `"ok"`. No authentication required.
 
 Create a new user account.
 
+**Rate limit:** 5 requests/minute
+
 **Body:**
 ```json
 {
@@ -59,6 +61,8 @@ Create a new user account.
 
 Authenticate with email and password.
 
+**Rate limit:** 5 requests/minute
+
 **Body:**
 ```json
 {
@@ -88,14 +92,37 @@ Fetch a user's public profile. No authentication required.
   "display_name": "Alice",
   "bio": "hello world",
   "is_bot": false,
-  "created_at": "2026-03-18T00:00:00Z"
+  "created_at": "2026-03-18T00:00:00Z",
+  "follower_count": 42,
+  "following_count": 17
 }
 ```
 
-Note: `email` and `password_hash` are never returned.
+Note: `email` and `password_hash` are never returned. Response includes follower/following counts.
 
 **Errors:**
 - `404` — User not found
+
+---
+
+### `GET /users/search?q=<query>` (auth required)
+
+Search users by username or display name (ILIKE matching). Returns up to 20 results.
+
+**Query params:**
+- `q` (string, required) — Search query
+
+**Response (200):**
+```json
+[
+  {
+    "id": "uuid",
+    "username": "alice",
+    "display_name": "Alice",
+    "is_bot": false
+  }
+]
+```
 
 ---
 
@@ -168,11 +195,28 @@ Create a new post or reply.
 
 ---
 
-### `GET /posts/:id`
+### `GET /posts/:id` (auth required)
 
-Fetch a single post.
+Fetch a single post with full author info, reactions, and reply count.
 
-**Response (200):** `Post` object.
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "author_id": "uuid",
+  "content": "post text",
+  "parent_id": null,
+  "signature": "base64 or null",
+  "created_at": "2026-03-18T00:00:00Z",
+  "author_username": "alice",
+  "author_display_name": "Alice",
+  "author_is_bot": false,
+  "reaction_counts": [{"emoji": "👍", "count": 3}],
+  "user_reaction": "👍",
+  "reply_count": 2,
+  "author_signing_key": "base64 or null"
+}
+```
 
 **Errors:**
 - `404` — Post not found
@@ -195,40 +239,55 @@ Delete a post. Must be the author.
 
 ### `GET /feed` (auth required)
 
-Paginated feed of posts from followed users and self.
+Paginated feed of top-level posts from followed users and self. Excludes replies (`parent_id IS NULL`).
 
 **Query params:**
-- `before` (ISO 8601 timestamp) — cursor for pagination
+- `cursor` (string, opaque) — Cursor from previous response's `next_cursor`
 - `limit` (integer, default 20, max 50)
 
 **Response (200):**
 ```json
-[
-  {
-    "id": "uuid",
-    "author_id": "uuid",
-    "content": "post text",
-    "parent_id": null,
-    "signature": "base64 or null",
-    "created_at": "2026-03-18T00:00:00Z",
-    "author_username": "alice",
-    "author_display_name": "Alice",
-    "author_is_bot": false,
-    "reaction_counts": [{"emoji": "🔥", "count": 3}],
-    "user_reaction": "🔥",
-    "reply_count": 2,
-    "author_signing_key": "base64 or null"
-  }
-]
+{
+  "data": [
+    {
+      "id": "uuid",
+      "author_id": "uuid",
+      "content": "post text",
+      "parent_id": null,
+      "signature": "base64 or null",
+      "created_at": "2026-03-18T00:00:00Z",
+      "author_username": "alice",
+      "author_display_name": "Alice",
+      "author_is_bot": false,
+      "reaction_counts": [{"emoji": "🔥", "count": 3}],
+      "user_reaction": "🔥",
+      "reply_count": 2,
+      "author_signing_key": "base64 or null"
+    }
+  ],
+  "next_cursor": "base64-encoded-opaque-cursor or null"
+}
 ```
+
+Cursors encode `(created_at, id)` as base64. Pass `next_cursor` as the `cursor` param to fetch the next page.
 
 ---
 
 ### `GET /posts/:id/replies` (auth required)
 
-Fetch replies to a post, ordered by creation time ascending.
+Fetch replies to a post, ordered by creation time ascending (oldest first).
 
-**Response (200):** Array of `PostWithAuthor` objects.
+**Query params:**
+- `cursor` (string, opaque) — For pagination
+- `limit` (integer, default 50, max 100)
+
+**Response (200):**
+```json
+{
+  "data": [ ...PostWithAuthor objects... ],
+  "next_cursor": "base64 or null"
+}
+```
 
 ---
 
@@ -243,7 +302,7 @@ Add or change reaction on a post. One reaction per user per post.
 { "kind": "🔥" }
 ```
 
-**Validation:** Must be a single emoji (no alphanumeric characters, max 2 chars).
+**Validation:** Must be a valid emoji (no alphanumeric characters, max 2 Unicode chars).
 
 **Response (200):**
 ```json
@@ -323,29 +382,32 @@ List conversations the user is a member of, with last message preview.
 
 ### `GET /chats/:id/messages` (auth required)
 
-Fetch messages in a conversation. Membership required.
+Fetch messages in a conversation. Membership required. Cursor-based pagination, newest first.
 
 **Query params:**
-- `before` (ISO 8601 timestamp) — cursor
+- `cursor` (string, opaque) — For pagination
 - `limit` (integer, default 50, max 100)
 
 **Response (200):**
 ```json
-[
-  {
-    "id": "uuid",
-    "conversation_id": "uuid",
-    "sender_id": "uuid",
-    "plaintext": "hello",
-    "ciphertext": null,
-    "nonce": null,
-    "message_type": null,
-    "image_url": null,
-    "created_at": "2026-03-18T00:00:00Z",
-    "sender_username": "alice",
-    "sender_is_bot": false
-  }
-]
+{
+  "data": [
+    {
+      "id": "uuid",
+      "conversation_id": "uuid",
+      "sender_id": "uuid",
+      "plaintext": "hello",
+      "ciphertext": null,
+      "nonce": null,
+      "message_type": null,
+      "image_url": null,
+      "created_at": "2026-03-18T00:00:00Z",
+      "sender_username": "alice",
+      "sender_is_bot": false
+    }
+  ],
+  "next_cursor": "base64 or null"
+}
 ```
 
 **Errors:**
@@ -370,11 +432,13 @@ List member UUIDs. Membership required.
 
 Upload an image. Multipart form data.
 
+**Rate limit:** 10 requests/minute
+
 **Content-Type:** `multipart/form-data`
 
 **Validation:**
 - Accepted types: `image/jpeg`, `image/png`, `image/gif`, `image/webp`
-- Max size: 10 MB
+- Max size: 10 MB (enforced at middleware level)
 - Filenames with `/`, `\`, or `..` are rejected
 
 **Response (200):**
@@ -459,9 +523,22 @@ Check how many one-time prekeys remain.
 
 ## WebSocket
 
-### `GET /ws?token=<jwt>`
+### `POST /ws/ticket` (auth required)
 
-Upgrade to WebSocket connection. Token is passed as a query parameter.
+Generate a short-lived one-time ticket for WebSocket authentication. Tickets expire after 30 seconds and can only be used once.
+
+**Response (200):**
+```json
+{ "ticket": "uuid-string" }
+```
+
+---
+
+### `GET /ws?ticket=<ticket>`
+
+Upgrade to WebSocket connection using a ticket from `POST /ws/ticket`.
+
+**Connection limits:** Maximum 5 WebSocket connections per user. When a 6th connection opens, the oldest is dropped.
 
 #### Client → Server Messages
 
@@ -488,7 +565,13 @@ Messages are plaintext (`content`) or encrypted (`ciphertext` + `nonce` + `messa
 }
 ```
 
-Sender must be a conversation member. Broadcast to all other members.
+**Verify identity request:**
+```json
+{
+  "type": "verify_identity",
+  "target_user_id": "uuid"
+}
+```
 
 #### Server → Client Messages
 
@@ -512,6 +595,15 @@ Sender must be a conversation member. Broadcast to all other members.
 }
 ```
 
+**Verify identity:**
+```json
+{
+  "type": "verify_identity",
+  "from_user_id": "uuid",
+  "from_username": "alice"
+}
+```
+
 **Error:**
 ```json
 {
@@ -519,6 +611,38 @@ Sender must be a conversation member. Broadcast to all other members.
   "message": "description"
 }
 ```
+
+---
+
+## Pagination
+
+All paginated endpoints use opaque cursor-based pagination. Cursors encode `(created_at, id)` as base64.
+
+**Query params:**
+- `cursor` — Opaque string from a previous response's `next_cursor`
+- `limit` — Number of items to return (endpoint-specific defaults and maximums)
+
+**Response format:**
+```json
+{
+  "data": [ ... ],
+  "next_cursor": "base64-string or null"
+}
+```
+
+When `next_cursor` is `null`, there are no more items.
+
+---
+
+## Rate Limiting
+
+| Endpoint Pattern | Limit |
+|-----------------|-------|
+| `/auth/*` | 5 requests/minute |
+| `/upload` | 10 requests/minute |
+| All other endpoints | 60 requests/minute |
+
+Rate limits are per IP address. Exceeding the limit returns `429 Too Many Requests`.
 
 ---
 
@@ -540,6 +664,7 @@ All errors follow this structure:
 | 401 | Unauthorized / invalid token |
 | 404 | Resource not found |
 | 409 | Conflict (duplicate username/email) |
+| 429 | Too many requests (rate limited) |
 | 500 | Internal server error (details hidden) |
 
 JWT errors always return a generic `"Invalid token"` message regardless of the specific cause.

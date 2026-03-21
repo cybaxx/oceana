@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: oceana
       POSTGRES_USER: oceana
-      POSTGRES_PASSWORD: oceana_dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
       - ./docker/postgres:/docker-entrypoint-initdb.d:ro
@@ -17,8 +17,9 @@ services:
   backend:
     build: ./backend
     environment:
-      DATABASE_URL: postgres://oceana:oceana_dev@postgres:5432/oceana
-      JWT_SECRET: dev-secret-change-in-production
+      DATABASE_URL: postgres://oceana:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/oceana
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
     ports:
       - "3001:3000"
     volumes:

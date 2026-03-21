@@ -1,6 +1,6 @@
 # Oceana - Architecture & API Design
 
-A social media platform built for learning, with a Rust backend, secure frontend, graph database experiments, and encryption-first design.
+A social media platform built for learning, with a Rust backend, secure frontend, and encryption-first design.
 
 ---
 
@@ -14,14 +14,16 @@ A social media platform built for learning, with a Rust backend, secure frontend
 - [Media Pipeline](#media-pipeline)
 - [Real-Time Chat & E2E Encryption](#real-time-chat--e2e-encryption)
 - [Feed System](#feed-system)
-- [Graph Database & Data Science](#graph-database--data-science)
 - [Content Rendering & Security](#content-rendering--security)
 - [Infrastructure & Deployment](#infrastructure--deployment)
 - [Learning Roadmap](#learning-roadmap)
+- [Future Architecture](#future-architecture)
 
 ---
 
 ## System Overview
+
+### Current Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -40,16 +42,27 @@ A social media platform built for learning, with a Rust backend, secure frontend
 │       │           │           │         │            │           │
 │  ┌────┴───────────┴───────────┴─────────┴────────────┴───────┐   │
 │  │                   Middleware Layer                        │   │
-│  │  Rate Limit · CORS · Auth · Logging · Compression         │   │
+│  │  Rate Limit · CORS · Auth · Logging · Security Headers    │   │
 │  └───────────────────────────────────────────────────────────┘   │
-└──────┬──────────────┬──────────────┬──────────────┬──────────-───┘
-       │              │              │              │
-       ▼              ▼              ▼              ▼
-┌────────────┐ ┌────────────┐ ┌──────────┐ ┌────────────┐
-│ PostgreSQL │ │   Neo4j    │ │  Redis   │ │   MinIO    │
-│  (primary  │ │  (graph    │ │ (cache,  │ │  (object   │
-│   store)   │ │   queries) │ │  pub/sub)│ │   storage) │
-└────────────┘ └────────────┘ └──────────┘ └────────────┘
+└──────┬──────────────────────────────────────────────────────-───┘
+       │
+       ▼
+┌────────────┐
+│ PostgreSQL │
+│  (primary  │
+│   store)   │
+└────────────┘
+```
+
+### Target Architecture (as features are added)
+
+```
+Axum Server
+  │
+  ├──► PostgreSQL  (source of truth for all data)
+  ├──► Neo4j       (social graph queries, recommendations)
+  ├──► Redis       (feed cache, WS pub/sub, rate limiting)
+  └──► MinIO       (S3-compatible media storage)
 ```
 
 ---
@@ -58,89 +71,72 @@ A social media platform built for learning, with a Rust backend, secure frontend
 
 ### Backend (Rust)
 
-| Component | Crate | Purpose |
-|---|---|---|
-| Web framework | `axum` | Async HTTP/WS server built on `tokio` and `tower` |
-| Database | `sqlx` | Compile-time checked async SQL (PostgreSQL) |
-| Graph DB | `neo4rs` | Neo4j async driver |
-| Cache/RT | `redis` (crate) | Session store, feed cache, pub/sub |
-| Serialization | `serde`, `serde_json` | JSON request/response handling |
-| Auth tokens | `jsonwebtoken` | JWT creation and validation |
-| Password hashing | `argon2` | Argon2id password hashing |
-| Encryption | `x25519-dalek`, `aes-gcm` | Key exchange and symmetric encryption for E2E chat |
-| WebSockets | `tokio-tungstenite` | Real-time bidirectional communication |
-| Middleware | `tower-http` | CORS, rate limiting, compression, tracing |
-| Object storage | `rust-s3` | S3-compatible API for MinIO |
-| Validation | `validator` | Request payload validation |
-| Tracing | `tracing`, `tracing-subscriber` | Structured logging and observability |
-| Migration | `sqlx-cli` | Database schema migrations |
+| Component | Crate | Purpose | Status |
+|---|---|---|---|
+| Web framework | `axum 0.7` | Async HTTP/WS server built on `tokio` and `tower` | In use |
+| Database | `sqlx 0.8` | Async SQL with compile-time checking (PostgreSQL) | In use |
+| Serialization | `serde`, `serde_json` | JSON request/response handling | In use |
+| Auth tokens | `jsonwebtoken 9` | JWT creation and validation (HS256) | In use |
+| Password hashing | `argon2 0.5` | Argon2id password hashing | In use |
+| Rate limiting | `dashmap 6` | In-memory per-IP rate limiter | In use |
+| Middleware | `tower-http` | CORS, tracing, body limits | In use |
+| Tracing | `tracing`, `tracing-subscriber` | Structured logging | In use |
+| WebSockets | Built-in Axum | Real-time bidirectional communication | In use |
+| Graph DB | `neo4rs` | Neo4j async driver | Planned |
+| Cache/RT | `redis` | Session store, feed cache, pub/sub | Planned |
+| Object storage | `rust-s3` | S3-compatible API for MinIO | Planned |
 
 ### Frontend
 
 | Component | Tool | Purpose |
 |---|---|---|
-| Framework | SvelteKit | SSR + SPA hybrid, minimal runtime |
+| Framework | SvelteKit 2 + Svelte 5 | SSR + SPA hybrid, minimal runtime |
 | Language | TypeScript | Type safety mirroring Rust's philosophy |
-| Markdown | `marked` + `DOMPurify` | Render and sanitize user markdown |
-| Syntax highlighting | `shiki` | Code block highlighting |
-| Media | Native `<video>`, `<img>` | Browser-native media playback |
+| Markdown | `marked` + `isomorphic-dompurify` | Render and sanitize user markdown |
+| Syntax highlighting | `highlight.js` | Code block highlighting |
 | WebSocket | Native `WebSocket` API | Real-time chat connection |
-| Crypto | Web Crypto API | Client-side E2E encryption primitives |
-| CSS | Tailwind CSS | Utility-first styling |
+| Crypto | Web Crypto API + `@privacyresearch/libsignal-protocol-typescript` | Signal Protocol E2EE + Ed25519 signing |
+| CSS | Tailwind CSS 4 | Utility-first styling |
 
 ### Infrastructure
 
-| Component | Tool | Purpose |
-|---|---|---|
-| Containers | Docker + docker-compose | Reproducible dev environment |
-| Primary DB | PostgreSQL 16 | Users, posts, messages, media metadata |
-| Graph DB | Neo4j 5 | Social graph, recommendations, analytics |
-| Cache | Redis 7 | Sessions, feed cache, chat pub/sub |
-| Object storage | MinIO | Self-hosted S3-compatible media storage |
-| Reverse proxy | Caddy or Nginx | TLS termination, static files |
+| Component | Tool | Purpose | Status |
+|---|---|---|---|
+| Containers | Docker + docker-compose | Reproducible dev environment | In use |
+| Primary DB | PostgreSQL 16 | Users, posts, messages, keys | In use |
+| File storage | Local `/uploads` directory | Image uploads | In use |
+| Graph DB | Neo4j 5 | Social graph, recommendations | Planned |
+| Cache | Redis 7 | Sessions, feed cache, chat pub/sub | Planned |
+| Object storage | MinIO | Self-hosted S3-compatible media | Planned |
 
 ---
 
 ## Data Layer
 
-### Polyglot Persistence Strategy
+PostgreSQL is the single datastore. All data lives here.
 
-Each datastore is chosen for what it does best. PostgreSQL is the **source of truth** for all transactional data. Other stores are derived or supplementary.
-
-```
-PostgreSQL (source of truth)
-    │
-    ├──► Neo4j  (event-driven sync of social graph edges)
-    ├──► Redis  (cache invalidation on write)
-    └──► MinIO  (media referenced by URL in postgres rows)
-```
-
-### PostgreSQL Schema
+### PostgreSQL Schema (Actual)
 
 ```sql
--- Core identity
+-- Core identity and auth
 CREATE TABLE users (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username    VARCHAR(32) UNIQUE NOT NULL,
-    email       VARCHAR(255) UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username        VARCHAR(32) UNIQUE NOT NULL,
+    email           VARCHAR(255) UNIQUE NOT NULL,
+    password_hash   TEXT NOT NULL,
+    display_name    VARCHAR(64),
+    bio             TEXT,
+    is_bot          BOOLEAN NOT NULL DEFAULT false,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Signal Protocol fields
+    identity_key            TEXT,
+    signed_prekey           TEXT,
+    signed_prekey_signature TEXT,
+    signed_prekey_id        INT,
+    signing_key             TEXT    -- Ed25519 public key for post signing
 );
 
--- Public-facing profile, separate from auth data
-CREATE TABLE profiles (
-    user_id     UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    display_name VARCHAR(64),
-    bio         TEXT,
-    avatar_url  TEXT,
-    banner_url  TEXT,
-    location    VARCHAR(128),
-    website     VARCHAR(255),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Social graph edges (also mirrored to Neo4j)
+-- Social graph edges
 CREATE TABLE follows (
     follower_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     followed_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -148,38 +144,21 @@ CREATE TABLE follows (
     PRIMARY KEY (follower_id, followed_id)
 );
 
--- Posts support multiple content types
+-- Posts (text content, replies via parent_id, optional Ed25519 signature)
 CREATE TABLE posts (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     author_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    content     TEXT,                          -- markdown text body
-    content_type VARCHAR(16) NOT NULL DEFAULT 'markdown',  -- 'markdown', 'plain'
-    parent_id   UUID REFERENCES posts(id) ON DELETE SET NULL,  -- for replies/threads
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Media attachments linked to posts
-CREATE TABLE media (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    post_id     UUID REFERENCES posts(id) ON DELETE CASCADE,
-    uploader_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    media_type  VARCHAR(16) NOT NULL,          -- 'image', 'video', 'audio', 'file'
-    mime_type   VARCHAR(128) NOT NULL,
-    storage_key TEXT NOT NULL,                  -- key in MinIO/S3
-    file_size   BIGINT NOT NULL,
-    width       INT,                            -- for images/video
-    height      INT,
-    duration_ms INT,                            -- for video/audio
-    blurhash    TEXT,                            -- placeholder while loading
+    content     TEXT NOT NULL,
+    parent_id   UUID REFERENCES posts(id) ON DELETE SET NULL,
+    signature   TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Reactions on posts
+-- Emoji reactions (one per user per post, any emoji)
 CREATE TABLE reactions (
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     post_id     UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-    kind        VARCHAR(16) NOT NULL DEFAULT 'like',
+    kind        VARCHAR(20) NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, post_id)
 );
@@ -197,98 +176,36 @@ CREATE TABLE conversation_members (
     PRIMARY KEY (conversation_id, user_id)
 );
 
--- Chat messages - ciphertext only when E2E is enabled
+-- Messages (plaintext or Signal Protocol encrypted)
 CREATE TABLE messages (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     sender_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    ciphertext      BYTEA,                      -- encrypted message body
-    nonce           BYTEA,                      -- encryption nonce
-    plaintext       TEXT,                        -- only used if E2E is off (dev/testing)
+    plaintext       TEXT,
+    ciphertext      TEXT,
+    nonce           TEXT,
+    message_type    INT,        -- 2 = WhisperMessage, 3 = PreKeyWhisperMessage
+    image_url       TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Identity keys for E2E encryption
-CREATE TABLE user_keys (
-    user_id         UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    identity_pubkey BYTEA NOT NULL,             -- X25519 public key
-    signed_prekey   BYTEA NOT NULL,             -- signed pre-key bundle
-    prekey_signature BYTEA NOT NULL,
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- One-time pre-keys (consumed on first message)
-CREATE TABLE one_time_prekeys (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+-- Signal Protocol one-time prekeys
+CREATE TABLE prekeys (
+    id          SERIAL PRIMARY KEY,
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    pubkey      BYTEA NOT NULL,
-    used        BOOLEAN NOT NULL DEFAULT false
+    key_id      INT NOT NULL,
+    public_key  TEXT NOT NULL,
+    UNIQUE (user_id, key_id)
 );
 
 -- Indexes
-CREATE INDEX idx_posts_author ON posts(author_id, created_at DESC);
+CREATE INDEX idx_posts_author ON posts(author_id);
 CREATE INDEX idx_posts_parent ON posts(parent_id);
-CREATE INDEX idx_media_post ON media(post_id);
 CREATE INDEX idx_follows_followed ON follows(followed_id);
 CREATE INDEX idx_messages_conversation ON messages(conversation_id, created_at);
 CREATE INDEX idx_reactions_post ON reactions(post_id);
+CREATE INDEX idx_reactions_kind ON reactions(kind);
 ```
-
-### Neo4j Graph Model
-
-Nodes and relationships mirrored from PostgreSQL:
-
-```cypher
-// Nodes
-(:User {id, username, display_name})
-(:Post {id, content_preview, created_at})
-(:Tag  {name})
-
-// Relationships
-(:User)-[:FOLLOWS {since}]->(:User)
-(:User)-[:AUTHORED]->(:Post)
-(:User)-[:REACTED {kind}]->(:Post)
-(:Post)-[:REPLY_TO]->(:Post)
-(:Post)-[:TAGGED]->(:Tag)
-(:User)-[:INTERESTED_IN]->(:Tag)
-```
-
-**Example graph queries:**
-
-```cypher
--- Friends of friends you don't follow yet (recommendations)
-MATCH (me:User {id: $user_id})-[:FOLLOWS]->()-[:FOLLOWS]->(suggestion:User)
-WHERE NOT (me)-[:FOLLOWS]->(suggestion) AND suggestion.id <> $user_id
-RETURN suggestion, count(*) AS mutual_connections
-ORDER BY mutual_connections DESC
-LIMIT 10
-
--- How a post spread through the network
-MATCH path = (origin:Post {id: $post_id})<-[:REPLY_TO*1..5]-(reply)
-RETURN path
-
--- Community detection (built-in algorithm)
-CALL gds.louvain.stream('social-graph')
-YIELD nodeId, communityId
-RETURN gds.util.asNode(nodeId).username AS user, communityId
-ORDER BY communityId
-
--- Degrees of separation
-MATCH path = shortestPath(
-    (a:User {id: $user_a})-[:FOLLOWS*..6]-(b:User {id: $user_b})
-)
-RETURN length(path) AS degrees, path
-```
-
-### Redis Usage
-
-| Key Pattern | Type | Purpose | TTL |
-|---|---|---|---|
-| `session:{token}` | String (JSON) | User session data | 7 days |
-| `feed:{user_id}` | Sorted Set | Cached feed post IDs, scored by timestamp | 1 hour |
-| `rate:{ip}:{endpoint}` | String (counter) | Rate limiting | 1 minute |
-| `online:{user_id}` | String | Presence tracking | 5 minutes |
-| `chat:{conversation_id}` | Pub/Sub channel | Real-time message delivery | N/A |
 
 ---
 
@@ -299,165 +216,32 @@ RETURN length(path) AS degrees, path
 - **Base URL:** `/api/v1/`
 - **Auth:** Bearer token in `Authorization` header
 - **Pagination:** Cursor-based using `?cursor=<opaque>&limit=20`
-- **Errors:** Consistent JSON error envelope
+- **Errors:** Consistent JSON error envelope: `{ "error": { "message": "..." } }`
 - **Content-Type:** `application/json` except media uploads (`multipart/form-data`)
 
-### Error Format
+See **[API Reference](api-reference.md)** for full endpoint documentation.
 
-```json
-{
-    "error": {
-        "code": "VALIDATION_ERROR",
-        "message": "Username must be between 3 and 32 characters",
-        "field": "username"
-    }
-}
-```
+### Key Endpoints
 
-### Endpoints
-
-#### Authentication
-
-```
-POST /api/v1/auth/register
-    Body: { username, email, password }
-    Returns: { user, access_token, refresh_token }
-
-POST /api/v1/auth/login
-    Body: { email, password }
-    Returns: { user, access_token, refresh_token }
-
-POST /api/v1/auth/refresh
-    Body: { refresh_token }
-    Returns: { access_token, refresh_token }
-
-POST /api/v1/auth/logout
-    Invalidates the current refresh token
-```
-
-#### Users & Profiles
-
-```
-GET    /api/v1/users/:id
-    Returns: { user, profile, follower_count, following_count }
-
-GET    /api/v1/users/:id/posts
-    Returns: paginated list of user's posts
-
-PUT    /api/v1/profile
-    Body: { display_name?, bio? }
-    Returns: { user }
-
-GET    /api/v1/users/:id/followers
-    Returns: paginated list of followers
-
-GET    /api/v1/users/:id/following
-    Returns: paginated list of followed users
-
-POST   /api/v1/users/:id/follow
-    Follows the user
-
-DELETE /api/v1/users/:id/follow
-    Unfollows the user
-```
-
-#### Posts
-
-```
-POST   /api/v1/posts
-    Body (multipart): {
-        content: "markdown text",
-        content_type: "markdown",
-        media_ids: ["uuid", ...],       // previously uploaded
-        parent_id?: "uuid"              // if replying
-    }
-    Returns: { post, media }
-
-GET    /api/v1/posts/:id
-    Returns: { post, author, media, reactions_summary }
-
-DELETE /api/v1/posts/:id
-    Deletes post (must be author)
-
-POST   /api/v1/posts/:id/reactions
-    Body: { kind: "like" }
-    Returns: { reaction }
-
-DELETE /api/v1/posts/:id/reactions
-    Removes reaction
-
-GET    /api/v1/posts/:id/replies
-    Returns: paginated replies
-```
-
-#### Feed
-
-```
-GET    /api/v1/feed
-    Query: ?cursor=<opaque>&limit=20
-    Returns: {
-        posts: [{ post, author, media, reactions_summary }],
-        next_cursor: "opaque"
-    }
-```
-
-#### Media
-
-```
-POST   /api/v1/media/upload
-    Body (multipart): file + metadata
-    Processing: validate type, strip EXIF, generate blurhash, store in MinIO
-    Returns: { media_id, media_type, url }
-
-GET    /api/v1/media/:id
-    Returns: 302 redirect to time-limited signed URL
-```
-
-#### Chat
-
-```
-GET    /api/v1/chats
-    Returns: list of conversations with last message preview
-
-POST   /api/v1/chats
-    Body: { participant_ids: ["uuid", ...] }
-    Returns: { conversation }
-
-GET    /api/v1/chats/:id/messages
-    Query: ?cursor=<opaque>&limit=50
-    Returns: paginated messages (ciphertext if E2E)
-
-GET    /api/v1/chats/:id/members
-    Returns: list of conversation members
-```
-
-#### Key Exchange (E2E Encryption)
-
-```
-PUT    /api/v1/keys/bundle
-    Body: { identity_pubkey, signed_prekey, prekey_signature, one_time_prekeys: [...] }
-    Uploads key bundle for other users to initiate E2E sessions
-
-GET    /api/v1/keys/:user_id/bundle
-    Returns: the user's public key bundle (consumes one one-time prekey)
-```
-
-#### WebSocket
-
-```
-WS /api/v1/ws
-    Auth: token passed as query param or first message
-
-    Client → Server messages:
-    { "type": "chat_message", "conversation_id": "uuid", "ciphertext": "base64", "nonce": "base64" }
-    { "type": "typing", "conversation_id": "uuid" }
-    { "type": "presence", "status": "online" }
-
-    Server → Client messages:
-    { "type": "chat_message", "conversation_id": "uuid", "sender_id": "uuid", "ciphertext": "base64", "nonce": "base64", "created_at": "iso8601" }
-    { "type": "typing", "conversation_id": "uuid", "user_id": "uuid" }
-    { "type": "notification", "kind": "follow|reaction|reply", "data": {...} }
-```
+| Endpoint | Method | Auth | Description |
+|---|---|---|---|
+| `/auth/register` | POST | No | Create account |
+| `/auth/login` | POST | No | Get JWT token |
+| `/users/search` | GET | Yes | Search by username/display name |
+| `/users/:id` | GET | No | Public profile with follower counts |
+| `/profile` | PUT | Yes | Update own profile |
+| `/users/:id/follow` | POST/DELETE | Yes | Follow/unfollow |
+| `/posts` | POST | Yes | Create post (with optional signature) |
+| `/posts/:id` | GET/DELETE | Yes | Get/delete post |
+| `/posts/:id/react` | POST/DELETE | Yes | Add/remove emoji reaction |
+| `/posts/:id/replies` | GET | Yes | Paginated replies |
+| `/feed` | GET | Yes | Paginated feed (followed + self) |
+| `/chats` | POST/GET | Yes | Create/list conversations |
+| `/chats/:id/messages` | GET | Yes | Paginated messages |
+| `/keys/bundle` | PUT/GET | Yes | Signal Protocol key management |
+| `/ws/ticket` | POST | Yes | Get one-time WS auth ticket |
+| `/ws` | WS | Ticket | Real-time chat |
+| `/upload` | POST | Yes | Image upload |
 
 ---
 
@@ -466,27 +250,26 @@ WS /api/v1/ws
 ### Token Strategy
 
 ```
-┌──────────┐     POST /auth/login      ┌──────────────┐
-│  Client  │ ──────────────────────────►│    Server    │
-│          │◄────────────────────────── │              │
-│          │  { access_token (JWT),     │  Validates   │
-│          │    refresh_token (opaque)} │  password    │
-│          │                            │  with        │
-│          │  GET /api/v1/feed          │  Argon2id    │
-│          │  Authorization: Bearer JWT │              │
-│          │ ──────────────────────────►│  Verifies    │
-│          │◄────────────────────────── │  JWT sig +   │
-│          │  { feed data }             │  expiry      │
-└──────────┘                            └──────────────┘
+Client                              Server
+  │  POST /auth/login                 │
+  │ ──────────────────────────────►   │
+  │                                   │  Validates password with Argon2id
+  │  { user, token (JWT) }           │
+  │ ◄──────────────────────────────   │
+  │                                   │
+  │  GET /api/v1/feed                 │
+  │  Authorization: Bearer <JWT>      │
+  │ ──────────────────────────────►   │  Verifies JWT signature + expiry
+  │  { data: [...] }                 │
+  │ ◄──────────────────────────────   │
 ```
 
-- **Access token:** JWT, signed with Ed25519, 15-minute expiry. Contains `user_id`, `username`, `iat`, `exp`. Stateless validation.
-- **Refresh token:** Opaque random string stored in PostgreSQL. 7-day expiry. Stored in `httpOnly`, `Secure`, `SameSite=Strict` cookie.
-- **Password hashing:** Argon2id with recommended parameters (19 MiB memory, 2 iterations, 1 parallelism).
+- **Access token:** JWT (HS256), 1-hour expiry. Contains `sub` (user_id), `username`, `iat`, `exp`. Stateless validation.
+- **Password hashing:** Argon2id with default parameters (tunable for production).
+- **JWT secret:** Must be 32+ characters, validated on startup. Known defaults are rejected.
+- **Token storage:** localStorage on the frontend (migrate to httpOnly cookies for production).
 
 ### Authorization Model
-
-Simple role-based to start:
 
 | Action | Rule |
 |---|---|
@@ -498,56 +281,41 @@ Simple role-based to start:
 | Read feed | Authenticated |
 | Send message | Conversation member |
 | Read messages | Conversation member |
-| Upload media | Authenticated, within size/rate limits |
+| Upload media | Authenticated, within rate limits |
 
 ---
 
 ## Media Pipeline
 
-### Upload Flow
+### Current Implementation
+
+Simple file upload to local filesystem:
 
 ```
-Client                    Axum Server                MinIO
+Client                    Axum Server                /uploads
   │                          │                         │
-  │  POST /media/upload      │                         │
+  │  POST /upload            │                         │
   │  (multipart/form-data)   │                         │
   │ ────────────────────────►│                         │
-  │                          │  1. Validate file type  │
-  │                          │     (magic bytes, not   │
-  │                          │      just extension)    │
-  │                          │  2. Enforce size limits │
-  │                          │  3. Strip EXIF metadata │
-  │                          │  4. Generate blurhash   │
-  │                          │  5. Create thumbnails   │
+  │                          │  1. Validate MIME type   │
+  │                          │     (jpeg/png/gif/webp)  │
+  │                          │  2. Enforce 10 MB limit  │
+  │                          │     (middleware layer)    │
+  │                          │  3. Reject path traversal│
+  │                          │  4. Generate UUID name    │
   │                          │                         │
-  │                          │  PUT object             │
+  │                          │  Write to /uploads/      │
   │                          │ ───────────────────────►│
-  │                          │◄─────────────────────── │
   │                          │                         │
-  │                          │  6. Store metadata in   │
-  │                          │     PostgreSQL          │
-  │                          │                         │
-  │  { media_id, url }       │                         │
+  │  { url: "/api/v1/uploads/uuid.png" }              │
   │ ◄────────────────────────│                         │
 ```
 
-### Supported Media Types
+Uploads are served with `Cache-Control: public, max-age=31536000, immutable` and `X-Content-Type-Options: nosniff`.
 
-| Type | Formats | Max Size | Processing |
-|---|---|---|---|
-| Image | JPEG, PNG, WebP, GIF | 10 MB | Strip EXIF, generate blurhash, resize thumbnails |
-| Video | MP4 (H.264), WebM | 100 MB | Extract thumbnail, transcode if needed |
-| Audio | MP3, OGG, WAV | 20 MB | Extract duration |
-| File | PDF | 25 MB | Virus scan |
+### Future: MinIO Object Storage
 
-### Security Measures
-
-- Validate file contents by reading magic bytes, not trusting `Content-Type` or extension
-- Strip all EXIF/metadata from images (prevents GPS leaks)
-- Serve media from a separate domain/subdomain to prevent cookie leakage
-- All download URLs are time-limited signed URLs (expire after 1 hour)
-- Virus scanning via ClamAV before storage
-- Rate limit uploads per user (e.g., 50 uploads/hour)
+Replace local `/uploads` with S3-compatible storage. Add EXIF stripping, blurhash generation, and signed download URLs.
 
 ---
 
@@ -562,135 +330,60 @@ Client                    Axum Server                MinIO
                  │  ┌──────────────────────────────┐  │
 ┌────────┐  WSS  │  │   Connection Manager          │  │
 │Client B│◄─────►│  │   (in-memory HashMap of       │  │
-└────────┘       │  │    user_id → ws_sender)        │  │
-                 │  └──────────┬───────────────────┘  │
-                 │             │                      │
-                 │             ▼                      │
-                 │  ┌──────────────────────────────┐  │
-                 │  │   Redis Pub/Sub               │  │
-                 │  │   (for multi-instance)         │  │
+└────────┘       │  │    user_id → Vec<Sender>)      │  │
+                 │  │   Max 5 connections/user       │  │
                  │  └──────────────────────────────┘  │
                  └──────────────────────────────────┘
 ```
 
-Single instance: deliver messages via in-memory connection map.
-Multi-instance: publish to Redis pub/sub, all instances subscribe and deliver to local connections.
+**Auth flow:** Client gets a one-time ticket via `POST /ws/ticket` (30s expiry), then connects via `GET /ws?ticket=<ticket>`.
 
-### E2E Encryption: Signal Protocol (Simplified)
+### E2E Encryption: Signal Protocol
 
-This is the most complex and rewarding security feature to implement.
+Fully implemented client-side using `@privacyresearch/libsignal-protocol-typescript`.
 
-#### Key Concepts
+#### DM Encryption (Signal Protocol)
+1. **X3DH key agreement** — 4 Diffie-Hellman operations establish a shared secret
+2. **Double Ratchet** — Derives new encryption keys per message (forward secrecy)
+3. **Key management** — Identity keys, signed prekeys, and one-time prekeys managed via REST API
 
-1. **Identity Key** - Long-term X25519 keypair per user. Public part uploaded to server.
-2. **Signed Pre-Key** - Medium-term key signed by identity key. Rotated periodically.
-3. **One-Time Pre-Keys** - Ephemeral keys uploaded in batches. Each consumed once.
-4. **Double Ratchet** - Derives new encryption keys for every message, providing forward secrecy.
+#### Group Encryption (AES-256-GCM)
+- Shared group key generated by the first sender
+- Distributed to members via pairwise Signal Protocol messages
+- Key stored in IndexedDB per conversation
 
-#### Session Setup (X3DH Key Agreement)
+#### Post Signing (Ed25519)
+- Posts signed client-side via Web Crypto API
+- Signatures verified by other clients against the author's public signing key
+- Badge shows verified/unverified/unsigned status
 
-```
-Alice wants to message Bob for the first time:
-
-1. Alice fetches Bob's key bundle from server:
-   - Bob's identity key (IK_B)
-   - Bob's signed pre-key (SPK_B)
-   - One one-time pre-key (OPK_B) — consumed
-
-2. Alice generates an ephemeral key pair (EK_A)
-
-3. Alice computes shared secret from 4 DH operations:
-   DH1 = X25519(IK_A_private, SPK_B)
-   DH2 = X25519(EK_A_private, IK_B)
-   DH3 = X25519(EK_A_private, SPK_B)
-   DH4 = X25519(EK_A_private, OPK_B)
-
-   shared_secret = KDF(DH1 || DH2 || DH3 || DH4)
-
-4. Alice sends initial message with:
-   - Her identity key (IK_A)
-   - Her ephemeral key (EK_A)
-   - Which one-time pre-key she used
-   - Ciphertext encrypted with shared_secret
-
-5. Bob reconstructs the same shared_secret using his private keys
-```
-
-#### Message Encryption
-
-```
-For each message:
-1. Derive message key from Double Ratchet state
-2. Encrypt: AES-256-GCM(message_key, nonce, plaintext)
-3. Send: { ciphertext, nonce, ratchet_header }
-
-The server only ever sees ciphertext. It cannot read messages.
-```
-
-#### Rust Crates for Implementation
-
-```toml
-[dependencies]
-x25519-dalek = "2"      # X25519 key exchange
-aes-gcm = "0.10"        # AES-256-GCM encryption
-hkdf = "0.12"           # Key derivation
-sha2 = "0.10"           # SHA-256 for KDF
-rand = "0.8"            # Secure random generation
-```
+See **[Encryption](encryption.md)** for full protocol details.
 
 ---
 
 ## Feed System
 
-### Feed Generation Strategy
-
-Start simple, evolve incrementally:
-
-#### Phase 1: Pull-Based Chronological
+### Current: Pull-Based Chronological with Cursor Pagination
 
 ```sql
--- Simple: get posts from people you follow, newest first
-SELECT p.*, u.username, u.display_name, pr.avatar_url
+SELECT p.*, u.username, u.display_name, u.is_bot, u.signing_key,
+       reaction_counts, user_reaction, reply_count
 FROM posts p
-JOIN follows f ON f.followed_id = p.author_id
 JOIN users u ON u.id = p.author_id
-LEFT JOIN profiles pr ON pr.user_id = u.id
-WHERE f.follower_id = $1
-ORDER BY p.created_at DESC
-LIMIT $2
-OFFSET 0  -- use cursor-based pagination instead in practice
+WHERE (p.author_id IN (SELECT followed_id FROM follows WHERE follower_id = $1)
+       OR p.author_id = $1)
+  AND p.parent_id IS NULL
+  AND (p.created_at, p.id) < ($cursor_ts, $cursor_id)
+ORDER BY p.created_at DESC, p.id DESC
+LIMIT $limit
 ```
 
-#### Phase 2: Cached with Redis
+Pagination uses opaque base64-encoded cursors containing `(created_at, id)`.
 
-```
-On post creation:
-  1. Insert into PostgreSQL
-  2. Fan-out: push post_id to Redis sorted sets for each follower
-     ZADD feed:{follower_id} {timestamp} {post_id}
+### Future: Cached + Ranked Feed
 
-On feed read:
-  1. ZREVRANGE feed:{user_id} cursor limit → post IDs
-  2. Batch-fetch posts from PostgreSQL
-  3. Return assembled feed
-```
-
-#### Phase 3: Ranked (Graph-Enhanced)
-
-Query Neo4j for ranking signals:
-
-```cypher
-// Get engagement score for feed ranking
-MATCH (me:User {id: $user_id})-[:FOLLOWS]->(author:User)-[:AUTHORED]->(post:Post)
-WHERE post.created_at > datetime() - duration('P1D')
-OPTIONAL MATCH (post)<-[r:REACTED]-()
-WITH post, author, count(r) AS reactions,
-     // Boost posts from users you interact with often
-     size((me)-[:REACTED]->()<-[:AUTHORED]-(author)) AS affinity
-RETURN post.id, reactions * 0.3 + affinity * 0.7 AS score
-ORDER BY score DESC
-LIMIT 50
-```
+- **Phase 2:** Fan-out-on-write with Redis sorted sets
+- **Phase 3:** Graph-enhanced ranking using Neo4j (affinity, engagement signals)
 
 ---
 
@@ -698,354 +391,173 @@ LIMIT 50
 
 ### Markdown Processing
 
-Posts support rich content via markdown with extensions:
+Posts support rich content via markdown:
 
-| Feature | Syntax | Rendered As |
-|---|---|---|
-| Bold, italic, etc. | Standard markdown | Formatted text |
-| Code blocks | ` ```rust ` | Syntax highlighted (shiki) |
-| Images | `![alt](media_id)` | Inline images from media pipeline |
-| Links | `[text](url)` | Sanitized anchor tags |
-| Mentions | `@username` | Profile link |
-| Hashtags | `#topic` | Tag link, indexed in Neo4j |
+| Feature | Rendered As |
+|---|---|
+| Bold, italic, etc. | Formatted text |
+| Code blocks (` ```lang `) | Syntax highlighted (highlight.js) |
+| Images `![](url)` | Inline images |
+| Links `[text](url)` | Sanitized anchor tags |
+| YouTube/Spotify/SoundCloud URLs | Embedded iframes |
 
-### Security: Content Sanitization
+### Security Measures
 
-```
-User input → Server-side sanitize → Store → Client-side sanitize → Render
-
-Server-side (Rust):
-  - Parse markdown with `pulldown-cmark`
-  - Strip all HTML tags except safe allowlist
-  - Validate URLs (no javascript: schemes)
-  - Limit nesting depth
-
-Client-side (SvelteKit):
-  - Render markdown with `marked`
-  - Sanitize HTML output with `DOMPurify`
-  - CSP headers prevent inline scripts
-```
-
-### Content Security Policy
-
-```
-Content-Security-Policy:
-  default-src 'self';
-  script-src 'self';
-  style-src 'self' 'unsafe-inline';
-  img-src 'self' media.oceana.local;
-  media-src 'self' media.oceana.local;
-  connect-src 'self' wss://oceana.local;
-  frame-src 'none';
-  object-src 'none';
-  base-uri 'self';
-```
-
----
-
-## Graph Database & Data Science
-
-### Sync Strategy: PostgreSQL → Neo4j
-
-Event-driven sync using application-level events (upgrade to CDC later):
-
-```rust
-// After a follow is created in PostgreSQL:
-async fn on_follow_created(follower_id: Uuid, followed_id: Uuid, neo4j: &Graph) {
-    neo4j.run(
-        query("MERGE (a:User {id: $fid}) MERGE (b:User {id: $tid}) MERGE (a)-[:FOLLOWS {since: datetime()}]->(b)")
-            .param("fid", follower_id.to_string())
-            .param("tid", followed_id.to_string())
-    ).await.unwrap();
-}
-```
-
-### Experiments to Try
-
-#### 1. Community Detection
-
-Find clusters of users who interact heavily with each other:
-
-```cypher
-// Project graph and run Louvain
-CALL gds.graph.project('social', 'User', 'FOLLOWS')
-CALL gds.louvain.stream('social')
-YIELD nodeId, communityId
-RETURN gds.util.asNode(nodeId).username, communityId
-ORDER BY communityId
-```
-
-#### 2. Influence Scoring (PageRank)
-
-```cypher
-CALL gds.pageRank.stream('social')
-YIELD nodeId, score
-RETURN gds.util.asNode(nodeId).username AS user, score
-ORDER BY score DESC
-LIMIT 20
-```
-
-#### 3. Content Recommendation
-
-```cypher
-// Users who reacted to similar posts also reacted to...
-MATCH (me:User {id: $uid})-[:REACTED]->(p:Post)<-[:REACTED]-(similar:User)
-WHERE similar <> me
-MATCH (similar)-[:REACTED]->(rec:Post)
-WHERE NOT (me)-[:REACTED]->(rec)
-RETURN rec.id, count(similar) AS score
-ORDER BY score DESC
-LIMIT 20
-```
-
-#### 4. Content Virality Analysis
-
-```cypher
-// Track how a post spreads through reply chains
-MATCH path = (origin:Post {id: $pid})<-[:REPLY_TO*1..10]-(reply)
-WITH reply, length(path) AS depth
-MATCH (reply)<-[:AUTHORED]-(author:User)
-RETURN depth, count(reply) AS replies_at_depth, collect(author.username) AS authors
-ORDER BY depth
-```
-
-#### 5. Six Degrees of Separation
-
-```cypher
-MATCH path = shortestPath(
-    (a:User {username: $user_a})-[:FOLLOWS*..6]-(b:User {username: $user_b})
-)
-RETURN [n IN nodes(path) | n.username] AS chain, length(path) AS degrees
-```
+- **Sanitization:** `isomorphic-dompurify` on both SSR and client paths
+- **CSP:** `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' wss:; frame-ancestors 'none'`
+- **Headers:** `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`
+- **Rate limiting:** Per-IP, per-endpoint (auth 5/min, uploads 10/min, general 60/min)
+- **Body limits:** 11 MB max request size at middleware layer
+- **Upload validation:** MIME type whitelist, path traversal rejection, UUID filenames
 
 ---
 
 ## Infrastructure & Deployment
 
-### Docker Compose (Development)
-
-Current setup — one command runs everything:
+### Docker Compose
 
 ```yaml
 services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: oceana
-      POSTGRES_USER: oceana
-      POSTGRES_PASSWORD: oceana_dev
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U oceana"]
-      interval: 2s
-      timeout: 3s
-      retries: 10
-
-  backend:
-    build: ./backend
-    environment:
-      DATABASE_URL: postgres://oceana:oceana_dev@postgres:5432/oceana
-      JWT_SECRET: dev-secret-change-in-production
-    ports:
-      - "3001:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  frontend:
-    build: ./frontend
-    environment:
-      API_URL: http://backend:3000
-    ports:
-      - "5173:5173"
-    depends_on:
-      - backend
-
-volumes:
-  pgdata:
+  postgres:    # PostgreSQL 16 with health check
+  backend:     # Multi-stage Rust build (rust:alpine → alpine:3.21)
+  frontend:    # Node 22 alpine, Vite dev server
 ```
 
-**Future additions** (as features are built):
-- Neo4j for graph queries and recommendations
-- Redis for caching, sessions, and chat pub/sub
-- MinIO for media/object storage
+Secrets are loaded from `.env` file (not hardcoded). See **[Deployment](deployment.md)**.
 
 ### Project Structure
 
-**Current (Phase 2 — full-stack MVP):**
-
 ```
 oceana/
-├── docs/
-│   ├── architecture.md          # this document
-│   ├── dev-pilot.md             # implementation progress tracker
-│   └── lessons.md               # structured learning curriculum
+├── docs/                          # This documentation
+├── scripts/
+│   ├── bot-activity.sh            # Bot content generation (signed posts, reactions, etc.)
+│   └── images/                    # Local ocean-themed test images
 ├── backend/
 │   ├── Cargo.toml
-│   ├── Dockerfile               # multi-stage Rust build
-│   ├── .env                     # DATABASE_URL, JWT_SECRET (local dev)
-│   ├── src/
-│   │   ├── main.rs              # entry point, server startup, migration
-│   │   ├── error.rs             # AppError enum → JSON responses
-│   │   ├── models.rs            # DB rows, request/response structs
-│   │   ├── auth.rs              # JWT, Argon2id, AuthUser extractor
-│   │   └── routes.rs            # all route handlers
-│   └── migrations/
-│       └── 001_initial.sql
+│   ├── Dockerfile
+│   ├── migrations/                # 001-008 + 999_seed.sql
+│   └── src/
+│       ├── main.rs                # Server startup, migration, router, middleware
+│       ├── error.rs               # AppError enum → JSON responses
+│       ├── models.rs              # DB rows, request/response structs, pagination
+│       ├── chat.rs                # WebSocket connection manager
+│       ├── auth.rs                # JWT, Argon2id, AuthUser extractor
+│       ├── rate_limit.rs          # Per-IP rate limiter (DashMap)
+│       └── routes.rs              # All route handlers (REST + WS + Signal keys)
 ├── frontend/
-│   ├── Dockerfile               # Node 22 alpine, Vite dev server
 │   ├── package.json
+│   ├── Dockerfile
 │   ├── svelte.config.js
 │   ├── vite.config.ts
 │   └── src/
-│       ├── app.html
-│       ├── app.css              # dark ocean terminal theme
-│       ├── hooks.server.ts      # API proxy to backend
+│       ├── app.html, app.css      # Shell + dark ocean terminal theme
+│       ├── hooks.server.ts        # API proxy to backend
 │       ├── lib/
-│       │   ├── api.ts           # typed fetch wrapper with JWT
-│       │   ├── types.ts         # User, Post, PostWithAuthor, AuthResponse
-│       │   └── stores/
-│       │       └── auth.ts      # Svelte store (localStorage, SSR-safe)
-│       └── routes/
-│           ├── +layout.svelte   # nav bar
-│           ├── +page.svelte     # feed
-│           ├── login/+page.svelte
-│           ├── register/+page.svelte
-│           ├── settings/+page.svelte
-│           ├── users/[id]/+page.svelte
-│           └── posts/[id]/+page.svelte
-├── docker-compose.yml           # postgres + backend + frontend
-├── test.sh                      # curl smoke test
-└── .gitignore
-```
-
-**Target (as features are added, split into subdirectories):**
-
-```
-oceana/
-├── docs/
-├── backend/
-│   ├── Cargo.toml
-│   ├── src/
-│   │   ├── main.rs
-│   │   ├── config.rs            # environment/config loading
-│   │   ├── error.rs
-│   │   ├── routes/
-│   │   │   ├── mod.rs
-│   │   │   ├── auth.rs
-│   │   │   ├── users.rs
-│   │   │   ├── posts.rs
-│   │   │   ├── feed.rs
-│   │   │   ├── media.rs
-│   │   │   ├── chat.rs
-│   │   │   └── keys.rs
-│   │   ├── models/
-│   │   │   ├── mod.rs
-│   │   │   ├── user.rs
-│   │   │   ├── post.rs
-│   │   │   ├── media.rs
-│   │   │   ├── message.rs
-│   │   │   └── conversation.rs
-│   │   ├── services/
-│   │   │   ├── mod.rs
-│   │   │   ├── auth.rs
-│   │   │   ├── feed.rs
-│   │   │   ├── media.rs
-│   │   │   ├── chat.rs
-│   │   │   └── graph.rs         # Neo4j sync and queries
-│   │   ├── middleware/
-│   │   │   ├── mod.rs
-│   │   │   ├── auth.rs          # JWT extraction/validation
-│   │   │   └── rate_limit.rs
-│   │   └── crypto/
-│   │       ├── mod.rs
-│   │       ├── passwords.rs     # Argon2id
-│   │       ├── tokens.rs        # JWT
-│   │       └── e2e.rs           # X25519, key bundles
-│   └── migrations/
-├── frontend/                    # SvelteKit (Phase 7)
+│       │   ├── api.ts             # Typed fetch wrapper with JWT auth
+│       │   ├── types.ts           # TypeScript interfaces
+│       │   ├── ws.ts              # WebSocket with ticket-based auth
+│       │   ├── crypto/            # Signal Protocol + Ed25519 + group keys
+│       │   ├── stores/            # auth.ts, chat.ts
+│       │   └── components/        # Markdown.svelte
+│       └── routes/                # SvelteKit file-based routing
 ├── docker-compose.yml
-└── test.sh
+├── .env.example
+├── test.sh                        # Integration test suite
+└── .gitignore
 ```
 
 ---
 
 ## Learning Roadmap
 
-### Phase 1: Foundation
-
-- [x] Set up monorepo with `backend/` and `frontend/` directories
+### Phase 1: Foundation — COMPLETE
+- [x] Monorepo with `backend/` and `frontend/`
 - [x] Docker Compose with PostgreSQL
-- [x] Axum hello world with health check endpoint
-- [x] Database migrations (inline SQL; upgrade to `sqlx-cli` later)
+- [x] Axum server with health check
+- [x] Database migrations (inline SQL, split-by-semicolon)
 - [x] User registration and login (Argon2id + JWT)
-- [x] SvelteKit frontend with login/register, feed, profiles, settings
+- [x] SvelteKit frontend with all pages
 
-### Phase 2: Core Social Features
-
-- [x] User profiles (CRUD)
-- [x] Post creation (text/markdown only, no media yet)
+### Phase 2: Core Social Features — COMPLETE
+- [x] User profiles (display_name, bio, follower/following counts)
+- [x] Post creation (markdown text, optional Ed25519 signature)
 - [x] Follow/unfollow
-- [x] Chronological feed (pull-based from PostgreSQL)
-- [ ] Post replies and threading
-- [ ] Reactions
-- [x] Frontend pages for feed, profiles, post detail
+- [x] Chronological feed with cursor-based pagination
+- [x] Post replies and threading (multi-level)
+- [x] Emoji reactions (any emoji, likes 👍, yikes 😬)
+- [x] User search (ILIKE matching)
 
-### Phase 3: Media
-
-- [ ] Add MinIO to docker-compose
-- [ ] Media upload endpoint with validation
+### Phase 3: Media — PARTIAL
+- [x] Image upload endpoint with MIME validation
+- [x] Image display in posts and chat
+- [x] Syntax highlighted code blocks (highlight.js)
+- [ ] MinIO object storage (currently local filesystem)
 - [ ] EXIF stripping and blurhash generation
-- [ ] Signed URL generation for downloads
-- [ ] Image and video display in posts
-- [ ] Syntax highlighted code blocks in frontend
 
-### Phase 4: Real-Time Chat
+### Phase 4: Real-Time Chat — COMPLETE
+- [x] WebSocket handler with ticket-based auth
+- [x] Connection manager (in-memory, 5 connections/user max)
+- [x] Conversation creation and message history
+- [x] Real-time message delivery
+- [x] Typing indicators
+- [x] Verify identity requests
 
-- [ ] WebSocket handler in Axum
-- [ ] Connection manager (in-memory)
-- [ ] Conversation creation and message history
-- [ ] Real-time message delivery
-- [ ] Typing indicators and presence
-- [ ] Redis pub/sub for multi-instance support
+### Phase 5: E2E Encryption — COMPLETE
+- [x] Key generation (Curve25519 + Ed25519) on client
+- [x] Key bundle upload/fetch API with OPK management
+- [x] X3DH key agreement
+- [x] AES-256-GCM message encryption
+- [x] Double Ratchet for forward secrecy
+- [x] Group chat E2EE (AES-256-GCM with group key distribution)
+- [x] Key verification UI (safety numbers / fingerprint modal)
+- [x] Ed25519 post signing + verification badges
 
-### Phase 5: E2E Encryption
-
-- [ ] Key generation (X25519) on client
-- [ ] Key bundle upload/fetch API
-- [ ] X3DH key agreement implementation
-- [ ] AES-256-GCM message encryption
-- [ ] Double Ratchet for forward secrecy
-- [ ] Key verification UI (safety numbers)
-
-### Phase 6: Graph Database & Data Science
-
-- [ ] Add Neo4j to docker-compose
-- [ ] Sync social graph edges from PostgreSQL
+### Phase 6: Graph Database — NOT STARTED
+- [ ] Neo4j integration
+- [ ] Social graph sync from PostgreSQL
 - [ ] Friend-of-friend recommendations
-- [ ] Community detection with Louvain algorithm
-- [ ] PageRank influence scoring
-- [ ] Content recommendation based on reaction similarity
-- [ ] Virality tracking and visualization
+- [ ] Community detection, PageRank, content recommendation
 
-### Phase 7: Hardening
-
-- [ ] Rate limiting per endpoint
-- [ ] Content Security Policy headers
-- [ ] Input validation on all endpoints
-- [ ] Audit logging for security-relevant actions
-- [ ] Automated testing (unit + integration)
+### Phase 7: Hardening — IN PROGRESS
+- [x] Rate limiting per endpoint
+- [x] Content Security Policy + security headers
+- [x] Input validation on all endpoints
+- [x] Secrets in `.env` (not hardcoded)
+- [x] CORS requires explicit origin
+- [x] WS ticket-based auth (replaces JWT in URL)
+- [x] Body size limits at middleware layer
+- [x] Backend unit tests (104 tests)
+- [x] Frontend unit tests (86 tests)
+- [x] Integration test suite (test.sh)
+- [ ] Fix silent encryption fallback to plaintext
+- [ ] WS message rate limiting and size validation
+- [ ] Group key rotation on membership changes
+- [ ] Token refresh/revocation
 - [ ] CI pipeline
+
+---
+
+## Future Architecture
+
+These components are planned but not yet implemented:
+
+### Neo4j (Graph Database)
+Social graph queries, friend-of-friend recommendations, community detection (Louvain), PageRank influence scoring, content recommendation based on reaction similarity.
+
+### Redis (Cache & Pub/Sub)
+Feed caching with sorted sets, WebSocket message fan-out for multi-instance deployments, session storage.
+
+### MinIO (Object Storage)
+Replace local `/uploads` with S3-compatible storage. Add signed download URLs, EXIF stripping, blurhash generation, and thumbnail creation.
 
 ---
 
 ## Open Design Decisions
 
-| Decision | Options | Notes |
+| Decision | Current | Notes |
 |---|---|---|
-| Frontend framework | SvelteKit (TypeScript) vs Leptos (Rust/WASM) | SvelteKit is faster to learn; Leptos keeps everything in Rust |
-| Search | PostgreSQL full-text vs Meilisearch vs Elasticsearch | Start with Postgres `tsvector`, add dedicated search later |
-| Notifications | Polling vs SSE vs WebSocket | WebSocket already in place for chat, reuse it |
-| Email | Skip initially vs SMTP integration | Not needed for learning, add later if desired |
-| Mobile | Skip vs PWA vs React Native | PWA via SvelteKit is free, native is a separate project |
+| Search | Not implemented | Start with PostgreSQL `tsvector`, add Meilisearch later |
+| Notifications | Not implemented | WebSocket already in place, reuse for push |
+| Mobile | Not implemented | PWA via SvelteKit is free, native is separate |
+| Email | Not implemented | Not needed for learning project |

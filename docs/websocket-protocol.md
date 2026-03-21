@@ -1,14 +1,23 @@
 # Oceana WebSocket Protocol
 
-Real-time bidirectional communication for chat messages and typing indicators.
+Real-time bidirectional communication for chat messages, typing indicators, and identity verification.
 
 ---
 
 ## Connection
 
-**Endpoint:** `GET /api/v1/ws?token=<jwt>`
+### Authentication (Ticket-Based)
 
-The JWT is passed as a query parameter. On successful authentication, the connection is upgraded to WebSocket.
+WebSocket connections use a two-step ticket-based auth flow to avoid exposing JWTs in URLs:
+
+1. **Get ticket:** `POST /api/v1/ws/ticket` (requires `Authorization: Bearer <jwt>`)
+   - Returns `{ "ticket": "uuid-string" }`
+   - Ticket expires after 30 seconds
+   - Ticket is single-use (consumed on connection)
+
+2. **Connect:** `GET /api/v1/ws?ticket=<ticket>`
+   - On valid ticket, connection is upgraded to WebSocket
+   - On invalid/expired ticket, returns `401 Unauthorized`
 
 ### Connection Limits
 
@@ -18,7 +27,7 @@ The JWT is passed as a query parameter. On successful authentication, the connec
 
 ### Reconnection
 
-The frontend client (`src/lib/ws.ts`) automatically reconnects after 3 seconds on disconnection, as long as a valid token exists.
+The frontend client (`src/lib/ws.ts`) automatically reconnects after 3 seconds on disconnection, as long as a valid auth token exists. Each reconnection gets a fresh ticket.
 
 ---
 
@@ -82,6 +91,17 @@ Send a typing indicator. Sender must be a conversation member. Broadcast to all 
 }
 ```
 
+#### `verify_identity`
+
+Request identity verification with another user. Triggers a safety number comparison flow.
+
+```json
+{
+  "type": "verify_identity",
+  "target_user_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
 ---
 
 ### Server → Client
@@ -122,6 +142,18 @@ Broadcast to all conversation members except the sender.
 }
 ```
 
+#### `verify_identity`
+
+Sent to the target user when someone initiates identity verification.
+
+```json
+{
+  "type": "verify_identity",
+  "from_user_id": "uuid",
+  "from_username": "alice"
+}
+```
+
 #### `error`
 
 Server-side error notification.
@@ -141,7 +173,7 @@ Server-side error notification.
 
 The `ConnectionManager` (`backend/src/chat.rs`) maintains an in-memory map of `user_id → Vec<Sender>`.
 
-- **connect:** Adds a new sender channel, caps at 5 per user
+- **connect:** Adds a new sender channel, caps at 5 per user (drops oldest on overflow)
 - **disconnect:** Removes the sender, cleans up empty entries
 - **send_to_user:** Broadcasts a message to all active connections for a user
 
@@ -167,7 +199,7 @@ WebSocket Handler (routes.rs)
 
 `frontend/src/lib/ws.ts` provides:
 
-- `connectWs()` — establishes connection with auto-reconnect
+- `connectWs()` — gets ticket, establishes connection with auto-reconnect
 - `disconnectWs()` — clean shutdown
 - `sendWsMessage(msg)` — sends JSON message
 - `onWsMessage(handler)` — registers message handler, returns unsubscribe function

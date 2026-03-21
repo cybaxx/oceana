@@ -12,7 +12,7 @@ use axum::Router;
 use chat::ConnectionManager;
 use rate_limit::RateLimiter;
 use sqlx::postgres::PgPoolOptions;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use http::Method;
 use std::net::SocketAddr;
@@ -38,6 +38,9 @@ async fn main() {
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+    if jwt_secret.len() < 32 || jwt_secret == "dev-secret-change-in-production" {
+        panic!("JWT_SECRET is too weak or a known default. Set a strong secret (32+ chars).");
+    }
 
     let db = PgPoolOptions::new()
         .max_connections(5)
@@ -92,11 +95,12 @@ async fn main() {
                     http::header::CONTENT_TYPE,
                     http::header::AUTHORIZATION,
                 ]);
-            match std::env::var("CORS_ORIGIN") {
-                Ok(origin) => cors.allow_origin(origin.parse::<http::HeaderValue>().expect("Invalid CORS_ORIGIN")),
-                Err(_) => cors.allow_origin(Any),
+            {
+                let origin = std::env::var("CORS_ORIGIN").expect("CORS_ORIGIN must be set (e.g. http://localhost:5173)");
+                cors.allow_origin(origin.parse::<http::HeaderValue>().expect("Invalid CORS_ORIGIN"))
             }
         })
+        .layer(axum::extract::DefaultBodyLimit::max(11 * 1024 * 1024)) // 11 MB (10 MB file + overhead)
         .layer(TraceLayer::new_for_http())
         .layer(middleware::from_fn(security_headers))
         .layer(middleware::from_fn_with_state(state.clone(), rate_limit_middleware))

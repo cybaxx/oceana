@@ -496,36 +496,61 @@ pub struct PostWithAuthor {
 
 ---
 
-## Module 8: Advanced Topics (Architecture Preview)
+## Module 8: Real-Time & Encryption (Implemented)
 
-These lessons correspond to planned phases in `docs/architecture.md`. They're here as a study guide for what's coming.
+These features are fully implemented. Study the code to understand how they work.
 
 ### Lesson 8.1 — WebSocket Real-Time Communication
 
-**Reference:** `docs/architecture.md` — Real-Time Chat section
+**Files:** `backend/src/chat.rs`, `backend/src/routes.rs` (ws_handler), `frontend/src/lib/ws.ts`
 
-**Concepts to learn:**
-- Upgrading HTTP connections to WebSocket in Axum
-- Managing a connection map (`HashMap<UserId, WsSender>`)
-- Broadcasting messages to conversation participants
-- Using Redis pub/sub for multi-instance deployments
+**Key Points:**
+- Axum's `WebSocketUpgrade` extractor handles the HTTP → WS upgrade
+- `ConnectionManager` stores `HashMap<UserId, Vec<Sender>>` — up to 5 connections per user
+- Ticket-based auth: client gets a one-time ticket via REST, passes it in the WS URL
+- Messages are broadcast to all conversation members via the connection manager
+- Typing indicators are forwarded to all other members
+
+**Study the code:**
+```rust
+// Ticket-based auth flow
+async fn create_ws_ticket(auth: AuthUser) -> Json<Value> {
+    let ticket = Uuid::new_v4().to_string();
+    state.ws_tickets.insert(ticket, (user_id, username, Instant::now()));
+    Json(json!({ "ticket": ticket }))
+}
+```
+
+**Exercise:**
+1. Add Redis pub/sub so messages are delivered across multiple server instances
+2. Add a `presence` message type that broadcasts online/offline status
 
 ---
 
 ### Lesson 8.2 — E2E Encryption (Signal Protocol)
 
-**Reference:** `docs/architecture.md` — E2E Encryption section
+**Files:** `frontend/src/lib/crypto/` (all files), `frontend/src/lib/stores/chat.ts`
 
-**Concepts to learn:**
-- X25519 Diffie-Hellman key exchange
-- X3DH key agreement protocol (4 DH operations)
-- AES-256-GCM symmetric encryption
-- The Double Ratchet algorithm for forward secrecy
-- Key bundle management (identity keys, signed pre-keys, one-time pre-keys)
+**Key Points:**
+- X3DH key agreement: 4 Diffie-Hellman operations establish a shared secret
+- Double Ratchet: derives a new key for every message (forward secrecy)
+- Group chat uses AES-256-GCM with a shared group key distributed via pairwise encryption
+- Ed25519 signing: posts are signed client-side, verified by other clients
+- Safety numbers: fingerprint comparison modal for verifying identity keys
+
+**Study the code:**
+- `crypto/keys.ts` — Key generation and bundle upload
+- `crypto/signal.ts` — X3DH, encrypt, decrypt
+- `crypto/groupkeys.ts` — Group key generation and distribution
+- `crypto/fingerprint.ts` — Safety number computation
+
+**Exercise:**
+1. Implement group key rotation when a member is removed
+2. Add a warning UI when a contact's identity key changes
 
 ---
 
-### Lesson 8.3 — Graph Database & Data Science
+### Lesson 8.3 — Graph Database & Data Science (Future)
 
 **Reference:** `docs/architecture.md` — Graph Database section
 
@@ -539,15 +564,19 @@ These lessons correspond to planned phases in `docs/architecture.md`. They're he
 
 ---
 
-### Lesson 8.4 — Feed System Evolution
+### Lesson 8.4 — Cursor-Based Pagination (Implemented)
 
-**Reference:** `docs/architecture.md` — Feed System section
+**Files:** `backend/src/models.rs` (encode_cursor, decode_cursor), `backend/src/routes.rs` (get_feed, get_replies)
 
-**Concepts to learn:**
-- Phase 1: Pull-based SQL query (current implementation)
-- Phase 2: Fan-out-on-write with Redis sorted sets
-- Phase 3: Ranked feed using graph signals (affinity scoring)
-- Cursor-based pagination vs offset pagination
+**Key Points:**
+- Cursors encode `(created_at, id)` as base64 — opaque to the client
+- Uses `(created_at, id) < ($cursor_ts, $cursor_id)` for stable, gap-free pagination
+- Feed paginates descending (newest first), replies paginate ascending (oldest first)
+- `PaginatedResponse<T>` wraps `{ data: [...], next_cursor: "..." }`
+
+**Exercise:**
+1. Add Redis-cached feed using sorted sets (fan-out-on-write)
+2. Implement a ranked feed using reaction counts as a scoring signal
 
 ---
 

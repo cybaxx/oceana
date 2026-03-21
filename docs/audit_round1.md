@@ -14,13 +14,13 @@ Oceana is a social platform with E2EE chat using the Signal Protocol (X3DH + Dou
 The most significant findings relate to: JWT tokens exposed in WebSocket URLs (logged in access logs), encryption fallback to plaintext on failure (silently breaking E2EE guarantees), lack of server-side content validation for WebSocket messages, and hardcoded secrets in docker-compose.yml.
 
 **Finding Summary:**
-| Severity | Count |
-|----------|-------|
-| CRITICAL | 2 |
-| HIGH     | 6 |
-| MEDIUM   | 8 |
-| LOW      | 7 |
-| INFO     | 6 |
+| Severity | Count | Fixed |
+|----------|-------|-------|
+| CRITICAL | 2 | 1 |
+| HIGH     | 6 | 2 |
+| MEDIUM   | 8 | 2 |
+| LOW      | 7 | 0 |
+| INFO     | 6 | — |
 
 ---
 
@@ -28,22 +28,9 @@ The most significant findings relate to: JWT tokens exposed in WebSocket URLs (l
 
 ### CRITICAL
 
-#### C-1: JWT Token Exposed in WebSocket URL Query Parameter
+#### C-1: ~~JWT Token Exposed in WebSocket URL Query Parameter~~ FIXED
 
-**File:** `/frontend/src/lib/ws.ts:13`, `/backend/src/routes.rs:635`
-**Description:** The JWT token is passed as a query parameter (`?token=...`) when connecting to WebSocket. Query parameters are:
-- Logged in web server access logs
-- Visible in browser history
-- Cached by proxies and CDNs
-- Exposed in Referrer headers
-
-```typescript
-// frontend/src/lib/ws.ts:13
-return `${proto}//${window.location.host}/api/v1/ws?token=${encodeURIComponent(token)}`;
-```
-
-**Impact:** Token leakage enables full account takeover for the token's lifetime (1 hour).
-**Recommendation:** Use a short-lived WebSocket ticket: client requests a one-time ticket via authenticated REST endpoint, then passes that ticket in the WS URL. The ticket is consumed on first use and expires in seconds. Alternatively, send the token as the first WS message after connection.
+**Status:** Remediated. WebSocket now uses ticket-based auth: `POST /api/v1/ws/ticket` returns a one-time UUID ticket (30s expiry). The ticket is passed in the URL instead of the JWT and consumed on first use.
 
 ---
 
@@ -115,36 +102,15 @@ while let Some(Ok(msg)) = ws_stream.next().await {
 
 ---
 
-#### H-4: No CSRF Protection
+#### H-4: ~~No CSRF Protection / Permissive CORS~~ FIXED
 
-**File:** `/backend/src/main.rs:83-94`
-**Description:** The API uses Bearer token authentication via the `Authorization` header, which provides inherent CSRF protection for JSON API calls (browsers don't send custom headers in cross-origin requests). However, the upload endpoint uses `multipart/form-data` which CAN be submitted cross-origin via HTML forms. The CORS configuration falls back to `allow_origin(Any)` when `CORS_ORIGIN` is not set.
-
-```rust
-// main.rs:90-93
-match std::env::var("CORS_ORIGIN") {
-    Ok(origin) => cors.allow_origin(origin.parse::<http::HeaderValue>().expect("Invalid CORS_ORIGIN")),
-    Err(_) => cors.allow_origin(Any),  // Wide open by default
-}
-```
-
-**Impact:** In default configuration (no `CORS_ORIGIN` set), any website can make authenticated API requests to the backend. While the `Authorization` header prevents most CSRF, the permissive CORS allows JavaScript from any origin to make requests with credentials.
-**Recommendation:** Never default to `allow_origin(Any)` in any configuration. Require `CORS_ORIGIN` to be explicitly set. Consider adding `SameSite` cookie attributes if cookies are ever added.
+**Status:** Remediated. `CORS_ORIGIN` is now required — the backend panics on startup if not set. No `Any` fallback exists. Only explicit origin, specific methods, and `Content-Type` + `Authorization` headers are allowed.
 
 ---
 
-#### H-5: Hardcoded Secrets in Docker Compose
+#### H-5: ~~Hardcoded Secrets in Docker Compose~~ FIXED
 
-**File:** `/docker-compose.yml:6-7,21-22`
-**Description:** Database password and JWT secret are hardcoded in the docker-compose file which is committed to the repository.
-
-```yaml
-POSTGRES_PASSWORD: oceana_dev
-JWT_SECRET: dev-secret-change-in-production
-```
-
-**Impact:** If this docker-compose file is used in any non-local environment, the JWT secret is known to anyone with repo access. With the JWT secret, an attacker can forge tokens for any user.
-**Recommendation:** Use environment variable substitution (`${JWT_SECRET}`) or Docker secrets. Add a startup check that rejects known-bad secrets like "dev-secret-change-in-production".
+**Status:** Remediated. Docker Compose now uses `${JWT_SECRET:?Set JWT_SECRET in .env}` and `${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}` variable substitution. The backend also validates on startup that JWT_SECRET is 32+ chars and not the known default string.
 
 ---
 
@@ -238,20 +204,9 @@ exp: now + 3600, // 1 hour for dev convenience
 
 ---
 
-#### M-5: Upload Size Check After Full Read Into Memory
+#### M-5: ~~Upload Size Check After Full Read Into Memory~~ FIXED
 
-**File:** `/backend/src/routes.rs:589-592`
-**Description:** The file upload handler reads the entire field contents into memory before checking the size limit.
-
-```rust
-let data = field.bytes().await.map_err(|e| AppError::BadRequest(e.to_string()))?;
-if data.len() > 10 * 1024 * 1024 {
-    return Err(AppError::BadRequest("File too large (max 10MB)".into()));
-}
-```
-
-**Impact:** An attacker can send very large files that consume server memory before being rejected. With the upload rate limit of 10/minute, this could be used for memory exhaustion.
-**Recommendation:** Configure Axum's body size limit at the middleware layer using `DefaultBodyLimit`. Use streaming reads with incremental size checks.
+**Status:** Remediated. `DefaultBodyLimit::max(11 * 1024 * 1024)` is now applied at the middleware layer, rejecting oversized requests before they're fully read into memory.
 
 ---
 
@@ -464,29 +419,27 @@ This is fine for a single-instance hobby project but would need Redis-backed sto
 
 ---
 
-## Prioritized Recommendations
+## Prioritized Recommendations (Updated)
+
+**Fixed:** C-1, H-4, H-5, M-5
 
 ### Immediate (P0)
 1. **Fix C-2:** Remove silent plaintext fallback. Fail encryption errors visibly to the user.
-2. **Fix C-1:** Move JWT from WebSocket URL to a one-time ticket mechanism or first-message auth.
 
 ### Short-term (P1)
-3. **Fix H-2:** Add per-message rate limiting to WebSocket handler.
-4. **Fix H-3:** Add WebSocket message size limits.
-5. **Fix H-4:** Remove `allow_origin(Any)` default; require explicit CORS origin.
-6. **Fix H-5:** Move secrets to environment variables with validation.
+2. **Fix H-2:** Add per-message rate limiting to WebSocket handler.
+3. **Fix H-3:** Add WebSocket message size limits.
 
 ### Medium-term (P2)
-7. **Fix H-6:** Implement group key rotation on membership changes.
-8. **Fix M-1:** Encrypt the localStorage sent message cache.
-9. **Fix M-4:** Implement token refresh mechanism.
-10. **Fix M-5:** Add request body size limits at the middleware layer.
+4. **Fix H-6:** Implement group key rotation on membership changes.
+5. **Fix M-1:** Encrypt the localStorage sent message cache.
+6. **Fix M-4:** Implement token refresh mechanism.
 
 ### Long-term (P3)
-11. **Fix M-8:** Use `FOR UPDATE SKIP LOCKED` for OPK consumption.
-12. **Fix M-3:** Add password length cap and complexity guidance.
-13. **Fix L-1:** Restrict username character set.
-14. Evaluate replacing `@privacyresearch/libsignal-protocol-typescript` with an officially maintained Signal library.
+7. **Fix M-8:** Use `FOR UPDATE SKIP LOCKED` for OPK consumption.
+8. **Fix M-3:** Add password length cap and complexity guidance.
+9. **Fix L-1:** Restrict username character set.
+10. Evaluate replacing `@privacyresearch/libsignal-protocol-typescript` with an officially maintained Signal library.
 
 ---
 

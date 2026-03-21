@@ -12,10 +12,10 @@ SvelteKit 2 + Svelte 5 + TypeScript + Tailwind CSS 4.
 | `/login` | `login/+page.svelte` | No | Email/password login |
 | `/register` | `register/+page.svelte` | No | Registration form |
 | `/settings` | `settings/+page.svelte` | Yes | Edit display name and bio |
-| `/users/[id]` | `users/[id]/+page.svelte` | No | User profile with follow/unfollow |
-| `/posts/[id]` | `posts/[id]/+page.svelte` | No | Single post detail view |
+| `/users/[id]` | `users/[id]/+page.svelte` | No | User profile with follow/unfollow, follower/following counts |
+| `/posts/[id]` | `posts/[id]/+page.svelte` | Yes | Post detail with replies, reactions, signature verification, comment input |
 | `/chat` | `chat/+page.svelte` | Yes | Conversation list, create new chat |
-| `/chat/[id]` | `chat/[id]/+page.svelte` | Yes | E2E encrypted chat view |
+| `/chat/[id]` | `chat/[id]/+page.svelte` | Yes | E2E encrypted chat view with safety numbers |
 | `/about` | `about/+page.svelte` | No | About page |
 
 ---
@@ -25,12 +25,23 @@ SvelteKit 2 + Svelte 5 + TypeScript + Tailwind CSS 4.
 | Library | File | Purpose |
 |---------|------|---------|
 | `src/lib/api.ts` | API client | Typed fetch wrapper with JWT auth, auto-logout on 401 |
-| `src/lib/ws.ts` | WebSocket | Connection management with auto-reconnect |
+| `src/lib/ws.ts` | WebSocket | Connection management with auto-reconnect, ticket-based auth |
 | `src/lib/types.ts` | Types | TypeScript interfaces for all API types |
 | `src/lib/stores/auth.ts` | Auth store | Svelte store with localStorage persistence |
-| `src/lib/stores/chat.ts` | Chat store | Conversations, messages, E2EE integration |
-| `src/lib/crypto/*` | Crypto | Signal Protocol + Ed25519 (see [encryption.md](encryption.md)) |
+| `src/lib/stores/chat.ts` | Chat store | Conversations, messages, E2EE integration, group keys |
+| `src/lib/crypto/*` | Crypto | Signal Protocol + Ed25519 + group keys (see [encryption.md](encryption.md)) |
 | `src/lib/components/Markdown.svelte` | Markdown | Renders markdown with syntax highlighting and embed support |
+
+### Crypto Modules
+
+| Module | Purpose |
+|--------|---------|
+| `crypto/index.ts` | Singleton init, auto key generation on login |
+| `crypto/store.ts` | IndexedDB-backed Signal Protocol store (TOFU) |
+| `crypto/keys.ts` | Identity/prekey generation, bundle upload, OPK replenishment |
+| `crypto/signal.ts` | X3DH, Double Ratchet encrypt/decrypt, Ed25519 signing/verification |
+| `crypto/groupkeys.ts` | AES-256-GCM group key generation and distribution |
+| `crypto/fingerprint.ts` | Safety number generation for key verification UI |
 
 ---
 
@@ -50,13 +61,14 @@ await api.getUser(id);
 await api.updateProfile({ display_name, bio });
 await api.follow(id);
 await api.unfollow(id);
+await api.searchUsers(query);
 
 // Posts
 await api.createPost(content, parent_id?, signature?);
-await api.getPost(id);
+await api.getPost(id);            // returns PostWithAuthor
 await api.deletePost(id);
-await api.getReplies(id);
-await api.getFeed(before?, limit?);
+await api.getReplies(id, cursor?); // returns PaginatedResponse
+await api.getFeed(cursor?, limit?); // returns PaginatedResponse
 
 // Reactions
 await api.reactToPost(id, emoji);
@@ -65,7 +77,7 @@ await api.unreactToPost(id);
 // Chat
 await api.createConversation(participant_ids);
 await api.listConversations();
-await api.getMessages(conversationId, before?, limit?);
+await api.getMessages(conversationId, cursor?, limit?);
 await api.getConversationMembers(conversationId);
 
 // Crypto
@@ -75,6 +87,9 @@ await api.getKeyCount();
 
 // Media
 await api.uploadImage(file);
+
+// WebSocket
+await api.getWsTicket();  // one-time ticket for WS auth
 ```
 
 ---
@@ -106,7 +121,7 @@ auth.logout();
 - Line breaks
 - Syntax-highlighted code blocks (highlight.js)
 - YouTube, SoundCloud, and Spotify embeds (auto-detected from URLs)
-- DOMPurify sanitization on both server and client (isomorphic-dompurify)
+- DOMPurify sanitization via `isomorphic-dompurify` (works in both SSR and client)
 
 Embeds are replaced before sanitization so the final output is always sanitized.
 
@@ -121,6 +136,16 @@ The frontend proxies `/api/v1/*` requests to the backend:
 
 ---
 
+## WebSocket
+
+`ws.ts` connects via a ticket-based auth flow:
+
+1. Client calls `POST /api/v1/ws/ticket` to get a one-time ticket (30s expiry)
+2. Client connects to `GET /api/v1/ws?ticket=<ticket>`
+3. Auto-reconnects on disconnection (3-second delay) while a valid token exists
+
+---
+
 ## Theme
 
 Dark ocean terminal aesthetic:
@@ -129,3 +154,24 @@ Dark ocean terminal aesthetic:
 - **Colors:** Ocean blues (`--ocean-950` to `--ocean-50`), terminal green/cyan/amber/red
 - **Effects:** Scanline overlay, glow on hover, cursor blink animation
 - **Scrollbars:** Styled to match theme
+
+---
+
+## Testing
+
+86 unit tests across 7 test files:
+
+| Test file | Coverage |
+|-----------|----------|
+| `crypto/store.test.ts` | IndexedDB Signal Protocol store |
+| `crypto/keys.test.ts` | Key generation, bundle upload |
+| `crypto/index.test.ts` | Crypto singleton init |
+| `crypto/signal.test.ts` | X3DH, encrypt/decrypt |
+| `crypto/groupkeys.test.ts` | AES-256-GCM group key ops |
+| `crypto/fingerprint.test.ts` | Safety number generation |
+| `stores/chat.test.ts` | Chat store with E2EE |
+
+Run with:
+```bash
+cd frontend && npx vitest run
+```

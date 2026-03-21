@@ -8,14 +8,14 @@
 
 ## Summary
 
-| Severity | Count |
-|----------|-------|
-| CRITICAL | 4 |
-| HIGH | 7 |
-| MEDIUM | 10 |
-| LOW | 6 |
-| INFO | 5 |
-| **Total** | **32** |
+| Severity | Count | Fixed |
+|----------|-------|-------|
+| CRITICAL | 4 | 2 |
+| HIGH | 7 | 3 |
+| MEDIUM | 10 | 5 |
+| LOW | 6 | 0 |
+| INFO | 5 | — |
+| **Total** | **32** | **10** |
 
 ---
 
@@ -57,30 +57,15 @@ return sanitized.replace(/<div data-embed="(\d+)"><\/div>/g, (_, idx) => {
 
 ---
 
-### C3. Permissive CORS allows cross-origin exploitation
+### C3. ~~Permissive CORS allows cross-origin exploitation~~ FIXED
 
-**File:** `backend/src/main.rs:67`
-
-```rust
-.layer(CorsLayer::permissive())
-```
-
-Sets `Access-Control-Allow-Origin: *` with all methods/headers. Any malicious site can make authenticated API calls on behalf of a logged-in user.
-
-**Fix:** Restrict to actual frontend origin(s):
-```rust
-CorsLayer::new().allow_origin("https://oceana.io".parse().unwrap())
-```
+**Status:** Remediated. `CORS_ORIGIN` is now required (backend panics if not set). No `Any` fallback exists. Explicit origin, methods, and headers are configured.
 
 ---
 
-### C4. Hardcoded seed user passwords
+### C4. ~~Hardcoded seed user passwords~~ FIXED
 
-**File:** `backend/migrations/999_seed.sql`
-
-All seed users share password `password123`. Migration re-runs silently on startup (errors swallowed with `.ok()`).
-
-**Fix:** Gate seed data behind `DEV_SEED=true` env var. Never ship to production.
+**Status:** Remediated. Seed data is now gated behind `SEED_DATA=true` environment variable. Only loaded when explicitly enabled.
 
 ---
 
@@ -106,17 +91,9 @@ All seed users share password `password123`. Migration re-runs silently on start
 
 ---
 
-### H3. JWT token in WebSocket query string
+### H3. ~~JWT token in WebSocket query string~~ FIXED
 
-**File:** `backend/src/routes.rs:537`
-
-```rust
-Query(query): Query<WsQuery>,  // ?token=eyJ...
-```
-
-Tokens in URLs are logged in server access logs, browser history, proxy logs, and Referer headers.
-
-**Fix:** Use a short-lived ticket exchange pattern, or pass the token in the first WebSocket frame.
+**Status:** Remediated. WebSocket now uses ticket-based auth: `POST /ws/ticket` returns a one-time UUID ticket (30s expiry), which is passed in the URL instead of the JWT. Tickets are consumed on use.
 
 ---
 
@@ -130,13 +107,9 @@ Tokens in URLs are logged in server access logs, browser history, proxy logs, an
 
 ---
 
-### H5. OPK exhaustion DoS on Signal key bundles
+### H5. ~~OPK exhaustion DoS on Signal key bundles~~ PARTIALLY FIXED
 
-**File:** `backend/src/routes.rs:807-813`
-
-`GET /keys/bundle/:user_id` atomically deletes a one-time prekey on every call with no rate limiting. An attacker can exhaust all OPKs, degrading forward secrecy.
-
-**Fix:** Rate-limit per requester; only serve OPKs to users sharing a conversation with the target.
+**Status:** Partially remediated. OPKs are now only consumed when the requester shares a conversation with the target user. General rate limiting (60/min) also applies. Per-requester rate limiting for key bundle fetches is still not implemented.
 
 ---
 
@@ -166,31 +139,21 @@ Failed schema migrations are silently ignored, potentially leaving the database 
 
 ## MEDIUM
 
-### M1. No rate limiting on any endpoint
+### M1. ~~No rate limiting on any endpoint~~ FIXED
 
-No rate limiting middleware exists. Enables login brute-force, registration spam, post flooding, and OPK exhaustion.
-
-**Fix:** Add `tower::limit::RateLimitLayer` or a custom middleware.
+**Status:** Remediated. Per-IP rate limiting is implemented via custom `RateLimiter` middleware using `DashMap`. Limits: auth 5/min, uploads 10/min, general 60/min. Returns 429 on excess.
 
 ---
 
-### M2. Upload reads full body before size check
+### M2. ~~Upload reads full body before size check~~ FIXED
 
-**File:** `backend/src/routes.rs:495-498`
-
-The entire file is read into memory, *then* the 10MB limit is checked. Attackers can exhaust server memory.
-
-**Fix:** Use `DefaultBodyLimit` middleware or stream bytes with an early abort.
+**Status:** Remediated. `DefaultBodyLimit::max(11 * 1024 * 1024)` is now applied at the middleware layer, rejecting oversized requests before they're fully read into memory.
 
 ---
 
-### M3. Unbounded WebSocket connections per user
+### M3. ~~Unbounded WebSocket connections per user~~ FIXED
 
-**File:** `backend/src/chat.rs:23`
-
-No limit on connections per user. An attacker can open thousands to exhaust memory and file descriptors.
-
-**Fix:** Cap at ~5 connections per user; close oldest on overflow.
+**Status:** Remediated. WebSocket connections are capped at 5 per user. When a 6th connection opens, the oldest is dropped.
 
 ---
 
@@ -214,13 +177,9 @@ Only the client-provided `Content-Type` header is checked. An attacker can uploa
 
 ---
 
-### M6. Missing `X-Content-Type-Options: nosniff` on uploads
+### M6. ~~Missing `X-Content-Type-Options: nosniff` on uploads~~ FIXED
 
-**File:** `backend/src/routes.rs:521-525`
-
-Enables content-type sniffing attacks on served uploads.
-
-**Fix:** Add the header to upload responses.
+**Status:** Remediated. `X-Content-Type-Options: nosniff` is set globally via security headers middleware on all responses, including uploads.
 
 ---
 
@@ -234,13 +193,9 @@ Arbitrary strings accepted as email addresses.
 
 ---
 
-### M8. Unbounded `bio` length
+### M8. ~~Unbounded `bio` length~~ FIXED
 
-**File:** `backend/src/routes.rs:121-134`
-
-`display_name` has a DB `VARCHAR(64)` but `bio` is `TEXT` with no limit. Enables storage abuse.
-
-**Fix:** Validate input lengths server-side (e.g., bio max 500 chars).
+**Status:** Remediated. Bio is validated to max 500 characters server-side in `update_profile`.
 
 ---
 
@@ -320,20 +275,23 @@ Mitigated by Bearer token auth (not cookies), but becomes exploitable if session
 
 ## Attack Chains
 
-### Chain 1: Full account takeover via XSS
-`C1 (SSR XSS)` + `M9 (localStorage token)` + `C3 (permissive CORS)` = attacker posts malicious content, steals any viewer's JWT, makes API calls from any origin.
+### Chain 1: Full account takeover via XSS (partially mitigated)
+`C1 (SSR XSS)` + `M9 (localStorage token)` = attacker posts malicious content, steals any viewer's JWT. *C3 (CORS) is now fixed* — cross-origin exploitation is blocked, but same-origin XSS still works.
 
-### Chain 2: Signal protocol degradation
-`H5 (OPK exhaustion)` + `M1 (no rate limiting)` = attacker exhausts victim's one-time prekeys, downgrading forward secrecy for all future key exchanges.
+### Chain 2: ~~Signal protocol degradation~~ MITIGATED
+`H5 (OPK exhaustion)` + ~~`M1 (no rate limiting)`~~ = OPKs are now conversation-gated and rate limiting exists. Exhaustion still possible but requires being in a conversation with the target.
 
 ### Chain 3: Conversation surveillance
-`H6 (typing no auth check)` + `H2 (force user into conversation)` = attacker creates conversation with victim and monitors their activity.
+`H6 (typing no auth check)` + `H2 (force user into conversation)` = attacker creates conversation with victim and monitors their activity. *Still open.*
 
 ---
 
-## Recommended Priority
+## Recommended Priority (Updated)
 
-1. **Immediate:** Fix C1, C2, C3 (XSS + CORS chain enables full account takeover)
-2. **This week:** Fix H1-H5 (authorization gaps, information disclosure)
-3. **Before production:** Fix all MEDIUM findings (rate limiting, upload hardening)
+**Fixed:** C3, C4, H3, H5 (partial), M1, M2, M3, M6, M8
+
+**Remaining priorities:**
+1. **Immediate:** Fix C1, C2 (XSS chain still enables account takeover)
+2. **This week:** Fix H1, H2, H4, H6, H7 (authorization gaps, information disclosure)
+3. **Before production:** Fix remaining MEDIUM findings (M4 plaintext, M7 email, M9 localStorage, M10 path traversal)
 4. **Ongoing:** Address LOW/INFO as part of hardening

@@ -25,8 +25,7 @@ pub fn router() -> Router<AppState> {
         .route("/profile", put(update_profile))
         // Posts
         .route("/posts", post(create_post))
-        .route("/posts/:id", get(get_post))
-        .route("/posts/:id", delete(delete_post))
+        .route("/posts/:id", get(get_post).delete(delete_post))
         .route("/posts/:id/react", post(react_to_post).delete(unreact_to_post))
         .route("/posts/:id/reactions", get(get_reactions))
         .route("/posts/:id/replies", get(get_replies))
@@ -61,12 +60,8 @@ async fn register(
     State(state): State<AppState>,
     Json(body): Json<RegisterRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    if body.username.len() < 3 || body.username.len() > 32 {
-        return Err(AppError::BadRequest("Username must be 3-32 characters".into()));
-    }
-    if body.password.len() < 8 {
-        return Err(AppError::BadRequest("Password must be at least 8 characters".into()));
-    }
+    validate_username(&body.username).map_err(AppError::BadRequest)?;
+    validate_password(&body.password).map_err(AppError::BadRequest)?;
     if !body.email.contains('@') || !body.email.contains('.') {
         return Err(AppError::BadRequest("Invalid email format".into()));
     }
@@ -235,14 +230,48 @@ async fn create_post(
 
 async fn get_post(
     State(state): State<AppState>,
+    auth: AuthUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<Post>, AppError> {
-    let post = sqlx::query_as::<_, Post>("SELECT * FROM posts WHERE id = $1")
-        .bind(id)
-        .fetch_optional(&state.db)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Post not found".into()))?;
-    Ok(Json(post))
+) -> Result<Json<PostWithAuthor>, AppError> {
+    let row = sqlx::query_as::<_, PostWithAuthorRow>(
+        r#"
+        SELECT p.id, p.author_id, p.content, p.parent_id, p.signature, p.created_at,
+               u.username AS author_username, u.display_name AS author_display_name,
+               u.is_bot AS author_is_bot,
+               u.signing_key AS author_signing_key,
+               COALESCE((SELECT json_agg(json_build_object('emoji', sub.kind, 'count', sub.cnt))
+                 FROM (SELECT kind, COUNT(*) AS cnt FROM reactions WHERE post_id = p.id GROUP BY kind) sub
+               ), '[]'::json) AS reaction_counts,
+               (SELECT kind FROM reactions WHERE post_id = p.id AND user_id = $2) AS user_reaction,
+               (SELECT COUNT(*) FROM posts r WHERE r.parent_id = p.id) AS reply_count
+        FROM posts p
+        JOIN users u ON u.id = p.author_id
+        WHERE p.id = $1
+        "#,
+    )
+    .bind(id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Post not found".into()))?;
+
+    Ok(Json(PostWithAuthor {
+        post: Post {
+            id: row.id,
+            author_id: row.author_id,
+            content: row.content,
+            parent_id: row.parent_id,
+            signature: row.signature,
+            created_at: row.created_at,
+        },
+        author_username: row.author_username,
+        author_display_name: row.author_display_name,
+        author_is_bot: row.author_is_bot,
+        reaction_counts: row.reaction_counts,
+        user_reaction: row.user_reaction,
+        reply_count: row.reply_count,
+        author_signing_key: row.author_signing_key,
+    }))
 }
 
 async fn delete_post(
@@ -326,7 +355,7 @@ async fn get_replies(
             let (ts, cid) = decode_cursor(c).map_err(|e| AppError::BadRequest(e))?;
             (ts, Some(cid))
         }
-        None => (chrono::DateTime::<chrono::Utc>::MIN_UTC, None),
+        None => (chrono::DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z").unwrap().with_timezone(&chrono::Utc), None),
     };
 
     let rows = sqlx::query_as::<_, PostWithAuthorRow>(
@@ -661,8 +690,14 @@ async fn ws_handler(
         .await
         .unwrap_or(false);
 
-    Ok(ws.on_upgrade(move |socket| handle_ws(socket, state, user_id, username, is_bot)))
+    Ok(ws.max_frame_size(64 * 1024) // 64 KB max frame size
+        .on_upgrade(move |socket| handle_ws(socket, state, user_id, username, is_bot)))
 }
+
+/// Max message content length for WS chat messages (matches post limit)
+const WS_MAX_CONTENT_LEN: usize = 10_000;
+/// Max WS messages per second per connection
+const WS_RATE_LIMIT: u32 = 10;
 
 async fn handle_ws(socket: WebSocket, state: AppState, user_id: Uuid, username: String, is_bot: bool) {
     let (mut ws_sink, mut ws_stream) = socket.split();
@@ -681,13 +716,35 @@ async fn handle_ws(socket: WebSocket, state: AppState, user_id: Uuid, username: 
         }
     });
 
+    // Per-connection rate limiting state
+    let mut msg_count: u32 = 0;
+    let mut window_start = Instant::now();
+
     // Receive messages from client
     while let Some(Ok(msg)) = ws_stream.next().await {
         match msg {
             WsMsg::Text(text) => {
+                // Rate limit: max WS_RATE_LIMIT messages per second
+                if window_start.elapsed().as_secs() >= 1 {
+                    msg_count = 0;
+                    window_start = Instant::now();
+                }
+                msg_count += 1;
+                if msg_count > WS_RATE_LIMIT {
+                    tracing::warn!("WS rate limit exceeded for user {user_id}");
+                    continue;
+                }
+
                 if let Ok(client_msg) = serde_json::from_str::<WsClientMessage>(&text) {
                     match client_msg {
                         WsClientMessage::SendMessage { conversation_id, content, image_url, ciphertext, nonce, message_type } => {
+                            // Validate content/ciphertext size
+                            if content.as_ref().map_or(false, |c| c.len() > WS_MAX_CONTENT_LEN)
+                                || ciphertext.as_ref().map_or(false, |c| c.len() > WS_MAX_CONTENT_LEN)
+                            {
+                                tracing::warn!("WS message too large from user {user_id}");
+                                continue;
+                            }
                             handle_send_message(&state, user_id, &username, is_bot, conversation_id, content, image_url, ciphertext, nonce, message_type).await;
                         }
                         WsClientMessage::Typing { conversation_id } => {
@@ -821,6 +878,28 @@ async fn handle_typing(
     }
 }
 
+// --- Registration validation helpers (for testing) ---
+
+fn validate_username(username: &str) -> Result<(), String> {
+    if username.len() < 3 || username.len() > 32 {
+        return Err("Username must be 3-32 characters".into());
+    }
+    if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err("Username may only contain a-z, A-Z, 0-9, _ and -".into());
+    }
+    Ok(())
+}
+
+fn validate_password(password: &str) -> Result<(), String> {
+    if password.len() < 8 {
+        return Err("Password must be at least 8 characters".into());
+    }
+    if password.len() > 128 {
+        return Err("Password must be at most 128 characters".into());
+    }
+    Ok(())
+}
+
 // --- Emoji validation helper (for testing) ---
 
 fn validate_emoji(kind: &str) -> Result<String, String> {
@@ -951,7 +1030,7 @@ async fn get_key_bundle(
 
     let opk = if shares_conversation {
         sqlx::query_as::<_, (i32, String)>(
-            "DELETE FROM prekeys WHERE id = (SELECT id FROM prekeys WHERE user_id = $1 LIMIT 1) RETURNING key_id, public_key"
+            "DELETE FROM prekeys WHERE id = (SELECT id FROM prekeys WHERE user_id = $1 ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING key_id, public_key"
         )
         .bind(user_id)
         .fetch_optional(&state.db)
@@ -1237,5 +1316,102 @@ mod tests {
     #[test]
     fn emoji_rejects_too_many_chars() {
         assert!(validate_emoji("🔥🧠💀").is_err());
+    }
+
+    // --- validate_username ---
+
+    #[test]
+    fn username_accepts_alphanumeric() {
+        assert!(validate_username("alice123").is_ok());
+    }
+
+    #[test]
+    fn username_accepts_underscore_and_dash() {
+        assert!(validate_username("cool_user-name").is_ok());
+    }
+
+    #[test]
+    fn username_rejects_too_short() {
+        assert!(validate_username("ab").is_err());
+    }
+
+    #[test]
+    fn username_rejects_too_long() {
+        let long = "a".repeat(33);
+        assert!(validate_username(&long).is_err());
+    }
+
+    #[test]
+    fn username_rejects_spaces() {
+        assert!(validate_username("has space").is_err());
+    }
+
+    #[test]
+    fn username_rejects_special_chars() {
+        assert!(validate_username("user@name").is_err());
+        assert!(validate_username("user!").is_err());
+        assert!(validate_username("user.name").is_err());
+    }
+
+    #[test]
+    fn username_rejects_unicode() {
+        assert!(validate_username("al\u{0456}ce").is_err()); // Cyrillic і
+    }
+
+    #[test]
+    fn username_accepts_boundary_lengths() {
+        assert!(validate_username("abc").is_ok()); // min 3
+        assert!(validate_username(&"a".repeat(32)).is_ok()); // max 32
+    }
+
+    // --- validate_password ---
+
+    #[test]
+    fn password_accepts_valid() {
+        assert!(validate_password("securepass123").is_ok());
+    }
+
+    #[test]
+    fn password_rejects_too_short() {
+        assert!(validate_password("short").is_err());
+    }
+
+    #[test]
+    fn password_rejects_too_long() {
+        let long = "a".repeat(129);
+        assert!(validate_password(&long).is_err());
+    }
+
+    #[test]
+    fn password_accepts_boundary_lengths() {
+        assert!(validate_password(&"a".repeat(8)).is_ok());   // min 8
+        assert!(validate_password(&"a".repeat(128)).is_ok()); // max 128
+    }
+
+    // --- like/yikes emoji validation ---
+
+    #[test]
+    fn emoji_accepts_thumbs_up_like() {
+        assert_eq!(validate_emoji("👍").unwrap(), "👍");
+    }
+
+    #[test]
+    fn emoji_accepts_grimace_yikes() {
+        assert_eq!(validate_emoji("😬").unwrap(), "😬");
+    }
+
+    #[test]
+    fn emoji_accepts_thumbs_down() {
+        assert_eq!(validate_emoji("👎").unwrap(), "👎");
+    }
+
+    #[test]
+    fn emoji_accepts_heart() {
+        assert_eq!(validate_emoji("❤️").unwrap(), "❤️");
+    }
+
+    #[test]
+    fn emoji_accepts_sparkles() {
+        assert_eq!(validate_emoji("✨").unwrap(), "✨");
     }
 }
