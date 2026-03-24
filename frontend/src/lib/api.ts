@@ -39,12 +39,14 @@ export const api = {
 	// Users
 	getUser: (id: string) => request('GET', `/users/${id}`),
 
-	updateProfile: (data: { display_name?: string; bio?: string }) =>
+	updateProfile: (data: { display_name?: string; bio?: string; avatar_url?: string }) =>
 		request('PUT', '/profile', data),
 
 	// Follow
 	follow: (id: string) => request('POST', `/users/${id}/follow`),
 	unfollow: (id: string) => request('DELETE', `/users/${id}/follow`),
+	getFollowers: (id: string) => request('GET', `/users/${id}/followers`),
+	getFollowing: (id: string) => request('GET', `/users/${id}/following`),
 
 	// Posts
 	createPost: (content: string, parent_id?: string, signature?: string) =>

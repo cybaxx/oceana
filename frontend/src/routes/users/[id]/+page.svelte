@@ -5,10 +5,20 @@
 	import type { User } from '$lib/types';
 	import { onMount } from 'svelte';
 
+	interface UserListItem {
+		id: string;
+		username: string;
+		display_name: string | null;
+		is_bot: boolean;
+	}
+
 	let user = $state<User | null>(null);
 	let error = $state('');
 	let following = $state(false);
 	let toggling = $state(false);
+	let showList = $state<'followers' | 'following' | null>(null);
+	let listUsers = $state<UserListItem[]>([]);
+	let listLoading = $state(false);
 
 	const userId = $derived($page.params.id);
 	const isMe = $derived($auth.user?.id === userId);
@@ -20,6 +30,21 @@
 			error = e.message;
 		}
 	});
+
+	async function openList(type: 'followers' | 'following') {
+		if (showList === type) { showList = null; return; }
+		showList = type;
+		listLoading = true;
+		try {
+			listUsers = (type === 'followers'
+				? await api.getFollowers(userId)
+				: await api.getFollowing(userId)) as UserListItem[];
+		} catch (e: any) {
+			listUsers = [];
+		} finally {
+			listLoading = false;
+		}
+	}
 
 	async function toggleFollow() {
 		toggling = true;
@@ -49,9 +74,13 @@
 			<div class="mb-1 text-xs text-[var(--terminal-dim)]">~/users/{user.username}</div>
 
 			<div class="mb-4 mt-4 flex items-center gap-4">
-				<div class="flex h-12 w-12 items-center justify-center rounded border border-[var(--terminal-border)] bg-[var(--ocean-800)] text-lg font-bold text-[var(--ocean-300)]">
-					{user.username[0].toUpperCase()}
-				</div>
+				{#if user.avatar_url}
+					<img src={user.avatar_url} alt="{user.username}'s avatar" class="h-12 w-12 rounded border border-[var(--terminal-border)] object-cover" />
+				{:else}
+					<div class="flex h-12 w-12 items-center justify-center rounded border border-[var(--terminal-border)] bg-[var(--ocean-800)] text-lg font-bold text-[var(--ocean-300)]">
+						{user.username[0].toUpperCase()}
+					</div>
+				{/if}
 				<div>
 					<h1 class="text-base font-bold text-[var(--ocean-100)]">
 						{user.display_name || user.username}
@@ -72,8 +101,34 @@
 			{/if}
 
 			<p class="mb-1 text-xs text-[var(--terminal-dim)]">
-				{user.follower_count ?? 0} followers · {user.following_count ?? 0} following
+				<button onclick={() => openList('followers')} class="hover:text-[var(--ocean-300)] underline decoration-dotted cursor-pointer bg-transparent border-none p-0 text-xs text-[var(--terminal-dim)]">{user.follower_count ?? 0} followers</button>
+				{' · '}
+				<button onclick={() => openList('following')} class="hover:text-[var(--ocean-300)] underline decoration-dotted cursor-pointer bg-transparent border-none p-0 text-xs text-[var(--terminal-dim)]">{user.following_count ?? 0} following</button>
 			</p>
+
+			{#if showList}
+				<div class="mb-3 rounded border border-[var(--terminal-border)] bg-[var(--ocean-950)] p-3">
+					<div class="mb-2 text-xs font-medium text-[var(--ocean-300)]">{showList}</div>
+					{#if listLoading}
+						<p class="text-xs text-[var(--terminal-dim)]">loading...</p>
+					{:else if listUsers.length === 0}
+						<p class="text-xs text-[var(--terminal-dim)]">none yet.</p>
+					{:else}
+						<ul class="list-none p-0 m-0 space-y-1">
+							{#each listUsers as u}
+								<li>
+									<a href="/users/{u.id}" class="text-xs text-[var(--terminal-green)] no-underline hover:underline">
+										@{u.username}
+										{#if u.display_name}
+											<span class="text-[var(--terminal-dim)]">({u.display_name})</span>
+										{/if}
+									</a>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
+			{/if}
 			<p class="mb-4 text-xs text-[var(--terminal-dim)]">
 				joined {new Date(user.created_at).toLocaleDateString()}
 			</p>

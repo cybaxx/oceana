@@ -5,6 +5,7 @@ export interface User {
 	display_name: string | null;
 	bio: string | null;
 	is_bot: boolean;
+	avatar_url: string | null;
 	created_at: string;
 }
 
@@ -26,6 +27,7 @@ export interface PostWithAuthor extends Post {
 	reply_count: number;
 	signature?: string | null;
 	author_signing_key?: string | null;
+	author_avatar_url?: string | null;
 }
 
 export interface AuthResponse {

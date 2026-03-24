@@ -21,6 +21,8 @@ pub fn router() -> Router<AppState> {
         // Users
         .route("/users/search", get(search_users))
         .route("/users/:id", get(get_user))
+        .route("/users/:id/followers", get(get_followers))
+        .route("/users/:id/following", get(get_following))
         .route("/users/:id/follow", post(follow_user).delete(unfollow_user))
         .route("/profile", put(update_profile))
         // Posts
@@ -165,10 +167,11 @@ async fn update_profile(
     }
 
     let user = sqlx::query_as::<_, User>(
-        "UPDATE users SET display_name = COALESCE($1, display_name), bio = COALESCE($2, bio) WHERE id = $3 RETURNING *"
+        "UPDATE users SET display_name = COALESCE($1, display_name), bio = COALESCE($2, bio), avatar_url = COALESCE($3, avatar_url) WHERE id = $4 RETURNING *"
     )
     .bind(&body.display_name)
     .bind(&body.bio)
+    .bind(&body.avatar_url)
     .bind(auth.user_id)
     .fetch_one(&state.db)
     .await?;
@@ -206,6 +209,32 @@ async fn unfollow_user(
     Ok(Json(serde_json::json!({ "status": "unfollowed" })))
 }
 
+async fn get_followers(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<UserSearchResult>>, AppError> {
+    let users = sqlx::query_as::<_, UserSearchResult>(
+        "SELECT u.id, u.username, u.display_name, u.is_bot FROM users u JOIN follows f ON f.follower_id = u.id WHERE f.followed_id = $1 ORDER BY u.username"
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(users))
+}
+
+async fn get_following(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<UserSearchResult>>, AppError> {
+    let users = sqlx::query_as::<_, UserSearchResult>(
+        "SELECT u.id, u.username, u.display_name, u.is_bot FROM users u JOIN follows f ON f.followed_id = u.id WHERE f.follower_id = $1 ORDER BY u.username"
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(users))
+}
+
 // --- Posts ---
 
 async fn create_post(
@@ -239,6 +268,7 @@ async fn get_post(
                u.username AS author_username, u.display_name AS author_display_name,
                u.is_bot AS author_is_bot,
                u.signing_key AS author_signing_key,
+               u.avatar_url AS author_avatar_url,
                COALESCE((SELECT json_agg(json_build_object('emoji', sub.kind, 'count', sub.cnt))
                  FROM (SELECT kind, COUNT(*) AS cnt FROM reactions WHERE post_id = p.id GROUP BY kind) sub
                ), '[]'::json) AS reaction_counts,
@@ -271,6 +301,7 @@ async fn get_post(
         user_reaction: row.user_reaction,
         reply_count: row.reply_count,
         author_signing_key: row.author_signing_key,
+        author_avatar_url: row.author_avatar_url,
     }))
 }
 
@@ -364,6 +395,7 @@ async fn get_replies(
                u.username AS author_username, u.display_name AS author_display_name,
                u.is_bot AS author_is_bot,
                u.signing_key AS author_signing_key,
+               u.avatar_url AS author_avatar_url,
                COALESCE((SELECT json_agg(json_build_object('emoji', sub.kind, 'count', sub.cnt))
                  FROM (SELECT kind, COUNT(*) AS cnt FROM reactions WHERE post_id = p.id GROUP BY kind) sub
                ), '[]'::json) AS reaction_counts,
@@ -401,6 +433,7 @@ async fn get_replies(
         user_reaction: r.user_reaction,
         reply_count: r.reply_count,
         author_signing_key: r.author_signing_key,
+        author_avatar_url: r.author_avatar_url,
     }).collect();
 
     let next_cursor = posts.last().map(|p| encode_cursor(&p.post.created_at, &p.post.id));
@@ -431,6 +464,7 @@ async fn get_feed(
                u.username AS author_username, u.display_name AS author_display_name,
                u.is_bot AS author_is_bot,
                u.signing_key AS author_signing_key,
+               u.avatar_url AS author_avatar_url,
                COALESCE((SELECT json_agg(json_build_object('emoji', sub.kind, 'count', sub.cnt))
                  FROM (SELECT kind, COUNT(*) AS cnt FROM reactions WHERE post_id = p.id GROUP BY kind) sub
                ), '[]'::json) AS reaction_counts,
@@ -469,6 +503,7 @@ async fn get_feed(
         user_reaction: r.user_reaction,
         reply_count: r.reply_count,
         author_signing_key: r.author_signing_key,
+        author_avatar_url: r.author_avatar_url,
     }).collect();
 
     let next_cursor = posts.last().map(|p| encode_cursor(&p.post.created_at, &p.post.id));
@@ -959,6 +994,7 @@ struct PostWithAuthorRow {
     author_display_name: Option<String>,
     author_is_bot: bool,
     author_signing_key: Option<String>,
+    author_avatar_url: Option<String>,
     reaction_counts: serde_json::Value,
     user_reaction: Option<String>,
     reply_count: i64,

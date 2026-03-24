@@ -16,6 +16,7 @@ pub struct User {
     pub display_name: Option<String>,
     pub bio: Option<String>,
     pub is_bot: bool,
+    pub avatar_url: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -146,6 +147,7 @@ pub struct PreKeyCountResponse {
 pub struct UpdateProfileRequest {
     pub display_name: Option<String>,
     pub bio: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -245,6 +247,7 @@ pub struct PostWithAuthor {
     pub user_reaction: Option<String>,
     pub reply_count: i64,
     pub author_signing_key: Option<String>,
+    pub author_avatar_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -297,6 +300,7 @@ mod tests {
             display_name: Some("Test User".into()),
             bio: None,
             is_bot: false,
+            avatar_url: None,
             created_at: Utc::now(),
         }
     }
@@ -340,6 +344,7 @@ mod tests {
             user_reaction: None,
             reply_count: 0,
             author_signing_key: None,
+            author_avatar_url: None,
         };
         let json = serde_json::to_value(&pwa).unwrap();
         // flattened — post fields are at top level, not nested
@@ -373,6 +378,7 @@ mod tests {
             user_reaction: Some("🔥".into()),
             reply_count: 0,
             author_signing_key: None,
+            author_avatar_url: None,
         };
         let json = serde_json::to_value(&pwa).unwrap();
         let counts = json["reaction_counts"].as_array().unwrap();
@@ -403,6 +409,7 @@ mod tests {
             user_reaction: None,
             reply_count: 0,
             author_signing_key: None,
+            author_avatar_url: None,
         };
         let json = serde_json::to_value(&pwa).unwrap();
         assert!(json.get("likes").is_none());
@@ -466,6 +473,7 @@ mod tests {
             user_reaction: None,
             reply_count: 5,
             author_signing_key: Some("pubkey==".into()),
+            author_avatar_url: None,
         };
         let json = serde_json::to_value(&pwa).unwrap();
         assert_eq!(json["signature"], "sig==");

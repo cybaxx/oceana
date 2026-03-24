@@ -219,15 +219,8 @@ export async function sendEncryptedMessage(
 ): Promise<void> {
 	const store = getCryptoStore();
 
-	// If no crypto store, fall back to plaintext
 	if (!store) {
-		sendWsMessage({
-			type: 'send_message',
-			conversation_id: conversationId,
-			content: plaintext,
-			image_url: imageUrl ?? null
-		});
-		return;
+		throw new Error('Encryption unavailable. Message not sent. Please reload the page.');
 	}
 
 	const others = recipientIds.filter((id) => id !== currentUserId);

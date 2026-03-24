@@ -132,6 +132,10 @@ function _page($$renderer, $$props) {
     } else {
       $$renderer2.push("<!--[-1-->");
     }
+    $$renderer2.push(`<!--]--> `);
+    {
+      $$renderer2.push("<!--[-1-->");
+    }
     $$renderer2.push(`<!--]--> <div class="border-t border-[var(--terminal-border)] pt-3">`);
     {
       $$renderer2.push("<!--[-1-->");

@@ -1,6 +1,7 @@
 import { f as derived } from "./index2.js";
 import { Marked } from "marked";
 import hljs from "highlight.js";
+/* empty css                                       */
 import DOMPurify from "isomorphic-dompurify";
 function html(value) {
   var html2 = String(value ?? "");

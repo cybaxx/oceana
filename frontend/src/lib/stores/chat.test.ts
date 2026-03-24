@@ -443,15 +443,16 @@ describe('chat store', () => {
 	});
 
 	describe('sendEncryptedMessage', () => {
-		it('falls back to plaintext when no crypto store', async () => {
+		it('throws when no crypto store instead of falling back to plaintext', async () => {
 			mockCryptoStore = null;
 
 			const { sendEncryptedMessage } = await import('./chat');
-			await sendEncryptedMessage('conv-1', 'hello', ['me', 'other'], 'me');
+			await expect(
+				sendEncryptedMessage('conv-1', 'hello', ['me', 'other'], 'me')
+			).rejects.toThrow('Encryption unavailable. Message not sent. Please reload the page.');
 
-			expect(mockSentMessages.length).toBe(1);
-			expect(mockSentMessages[0].content).toBe('hello');
-			expect(mockSentMessages[0].ciphertext).toBeUndefined();
+			// Verify no plaintext message was sent
+			expect(mockSentMessages.length).toBe(0);
 		});
 
 		it('sends plaintext for self-chat (no other recipients)', async () => {

@@ -5,9 +5,27 @@
 
 	let displayName = $state($auth.user?.display_name ?? '');
 	let bio = $state($auth.user?.bio ?? '');
+	let avatarUrl = $state($auth.user?.avatar_url ?? '');
 	let error = $state('');
 	let success = $state(false);
 	let submitting = $state(false);
+	let uploading = $state(false);
+
+	async function handleAvatarUpload(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		uploading = true;
+		error = '';
+		try {
+			const { url } = await api.uploadImage(file);
+			avatarUrl = url;
+		} catch (err: any) {
+			error = err.message;
+		} finally {
+			uploading = false;
+		}
+	}
 
 	async function submit() {
 		error = '';
@@ -16,7 +34,8 @@
 		try {
 			const user = (await api.updateProfile({
 				display_name: displayName || undefined,
-				bio: bio || undefined
+				bio: bio || undefined,
+				avatar_url: avatarUrl || undefined
 			})) as User;
 			auth.updateUser(user);
 			success = true;
@@ -46,6 +65,22 @@
 			{/if}
 
 			<form onsubmit={(e) => { e.preventDefault(); submit(); }} class="space-y-4">
+				<div>
+					<label for="avatar" class="mb-1 block text-xs text-[var(--terminal-dim)]">avatar</label>
+					<div class="flex items-center gap-3">
+						{#if avatarUrl}
+							<img src={avatarUrl} alt="avatar" class="h-12 w-12 rounded border border-[var(--terminal-border)] object-cover" />
+						{:else}
+							<div class="flex h-12 w-12 items-center justify-center rounded border border-[var(--terminal-border)] bg-[var(--ocean-800)] text-lg font-bold text-[var(--ocean-300)]">
+								{($auth.user?.username ?? '?')[0].toUpperCase()}
+							</div>
+						{/if}
+						<label class="cursor-pointer rounded border border-[var(--terminal-border)] px-3 py-1.5 text-xs text-[var(--terminal-dim)] transition-all hover:border-[var(--ocean-400)] hover:text-[var(--ocean-300)]">
+							{uploading ? 'uploading...' : '$ upload'}
+							<input id="avatar" type="file" accept="image/jpeg,image/png,image/gif,image/webp" onchange={handleAvatarUpload} class="hidden" disabled={uploading} />
+						</label>
+					</div>
+				</div>
 				<div>
 					<label for="displayName" class="mb-1 block text-xs text-[var(--terminal-dim)]">display_name</label>
 					<input

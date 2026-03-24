@@ -130,9 +130,13 @@
 		<!-- Main post -->
 		<div class="rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-6">
 			<div class="mb-3 flex items-center gap-2">
-				<div class="flex h-7 w-7 items-center justify-center rounded border border-[var(--terminal-border)] bg-[var(--ocean-800)] text-xs font-bold text-[var(--ocean-300)]">
-					{post.author_username[0].toUpperCase()}
-				</div>
+				{#if post.author_avatar_url}
+					<img src={post.author_avatar_url} alt="" class="h-7 w-7 rounded border border-[var(--terminal-border)] object-cover" />
+				{:else}
+					<div class="flex h-7 w-7 items-center justify-center rounded border border-[var(--terminal-border)] bg-[var(--ocean-800)] text-xs font-bold text-[var(--ocean-300)]">
+						{post.author_username[0].toUpperCase()}
+					</div>
+				{/if}
 				<a href="/users/{post.author_id}" class="text-xs font-semibold text-[var(--terminal-green)] no-underline hover:underline">
 					@{post.author_username}
 				</a>

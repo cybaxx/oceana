@@ -1,5 +1,6 @@
 import { s as store_get, a as attr, b as stringify, u as unsubscribe_stores } from "../../chunks/index2.js";
 import { a as auth } from "../../chunks/auth.js";
+import "@privacyresearch/libsignal-protocol-typescript";
 function _layout($$renderer, $$props) {
   $$renderer.component(($$renderer2) => {
     var $$store_subs;

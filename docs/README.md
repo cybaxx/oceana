@@ -15,6 +15,7 @@
 - **[Architecture](architecture.md)** — System overview, technology stack, data layer design, future roadmap
 - **[Dev Pilot](dev-pilot.md)** — Implementation progress, design decisions, lessons learned
 - **[Future Goals](future_goals.md)** — Prioritized roadmap of remaining features and security work
+- **[Quick Wins Plan](quick-wins-plan.md)** — Implementation plan for 4 ready-to-build features
 - **[Lessons](lessons.md)** — Structured learning curriculum built from the codebase
 
 ## Security

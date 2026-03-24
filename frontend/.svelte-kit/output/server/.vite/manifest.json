@@ -170,7 +170,7 @@
       "_auth.js"
     ],
     "css": [
-      "_app/immutable/assets/_layout.BxOWYe2x.css"
+      "_app/immutable/assets/_layout.Dh5R9Try.css"
     ]
   },
   "src/routes/+page.svelte": {
@@ -249,6 +249,9 @@
       "_root.js",
       "_state.svelte.js",
       "_auth.js"
+    ],
+    "css": [
+      "_app/immutable/assets/Markdown.D8mr4Vib.css"
     ]
   },
   "src/routes/register/+page.svelte": {

@@ -16,7 +16,7 @@ The most significant findings relate to: JWT tokens exposed in WebSocket URLs (l
 **Finding Summary:**
 | Severity | Count | Fixed |
 |----------|-------|-------|
-| CRITICAL | 2 | 1 |
+| CRITICAL | 2 | 2 |
 | HIGH     | 6 | 2 |
 | MEDIUM   | 8 | 2 |
 | LOW      | 7 | 0 |
@@ -34,25 +34,9 @@ The most significant findings relate to: JWT tokens exposed in WebSocket URLs (l
 
 ---
 
-#### C-2: Silent Fallback to Plaintext on Encryption Failure
+#### C-2: ~~Silent Fallback to Plaintext on Encryption Failure~~ FIXED
 
-**File:** `/frontend/src/lib/stores/chat.ts:274-283`, `chat.ts:301-309`
-**Description:** When encryption fails (either group or pairwise), the code silently falls back to sending the message as plaintext. The user sees no warning that their message was sent unencrypted.
-
-```typescript
-// chat.ts:274-283 (group encryption failure)
-} catch (e) {
-    console.error('Group encryption failed:', e);
-    sendWsMessage({
-        type: 'send_message',
-        conversation_id: conversationId,
-        content: plaintext,  // PLAINTEXT FALLBACK
-        image_url: imageUrl ?? null
-    });
-```
-
-**Impact:** Users believe their messages are E2EE (the UI shows the lock icon since `cryptoReady` is true) while messages may be sent as plaintext and stored permanently on the server. This is a fundamental E2EE trust violation.
-**Recommendation:** Never silently fall back to plaintext. Either fail loudly with a user-visible error, or queue the message for retry. At minimum, show a clear warning that the message was sent unencrypted.
+**Status:** Remediated. `sendEncryptedMessage()` now throws an error when the crypto store is unavailable or encryption fails, instead of silently falling back to plaintext. The UI catches the error and displays it to the user via `sendError`. No message is sent if encryption cannot be performed.
 
 ---
 
@@ -421,10 +405,7 @@ This is fine for a single-instance hobby project but would need Redis-backed sto
 
 ## Prioritized Recommendations (Updated)
 
-**Fixed:** C-1, H-4, H-5, M-5
-
-### Immediate (P0)
-1. **Fix C-2:** Remove silent plaintext fallback. Fail encryption errors visibly to the user.
+**Fixed:** C-1, C-2, H-4, H-5, M-5
 
 ### Short-term (P1)
 2. **Fix H-2:** Add per-message rate limiting to WebSocket handler.
