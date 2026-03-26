@@ -85,7 +85,8 @@
 		});
 		return DOMPurify.sanitize(withEmbeds, {
 			ADD_TAGS: ['iframe'],
-			ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'loading', 'src']
+			ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'loading', 'src'],
+			ALLOWED_URI_REGEXP: /^(?:(?:https?:\/\/(?:www\.youtube\.com|youtube\.com|w\.soundcloud\.com|open\.spotify\.com)\/)|(?:(?!javascript:)(?:[a-z][a-z0-9+\-.]*:))|(?:#|\/|\.\/))/i
 		});
 	});
 </script>

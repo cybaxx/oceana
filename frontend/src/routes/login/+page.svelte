@@ -14,7 +14,7 @@
 		submitting = true;
 		try {
 			const res = (await api.login(email, password)) as AuthResponse;
-			auth.login(res.user, res.token);
+			auth.login(res.user, res.token, res.refresh_token);
 			goto('/');
 		} catch (e: any) {
 			error = e.message;

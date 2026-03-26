@@ -57,6 +57,11 @@ export function getCryptoStore(): SignalProtocolStore | null {
 	return store;
 }
 
+export function clearCryptoStore(): void {
+	store = null;
+	initPromise = null;
+}
+
 export { SignalProtocolStore } from './store';
 export { encryptMessage, decryptMessage, signContent, verifySignature, initSession } from './signal';
 export { arrayBufferToBase64, base64ToArrayBuffer } from './keys';

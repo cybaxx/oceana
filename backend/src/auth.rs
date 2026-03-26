@@ -22,7 +22,7 @@ pub fn create_token(user_id: Uuid, username: &str, secret: &str) -> Result<Strin
     let claims = Claims {
         sub: user_id,
         username: username.to_string(),
-        exp: now + 3600, // 1 hour for dev convenience
+        exp: now + 900, // 15 min; use refresh tokens for longer sessions
         iat: now,
     };
     Ok(encode(
@@ -71,6 +71,51 @@ impl FromRequestParts<AppState> for AuthUser {
             username: claims.username,
         })
     }
+}
+
+pub async fn create_refresh_token(db: &sqlx::PgPool, user_id: Uuid) -> Result<String, AppError> {
+    let token = Uuid::new_v4().to_string();
+    let expires_at = Utc::now() + chrono::Duration::days(30);
+    sqlx::query("INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)")
+        .bind(user_id)
+        .bind(&token)
+        .bind(expires_at)
+        .execute(db)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(token)
+}
+
+pub async fn validate_refresh_token(
+    db: &sqlx::PgPool,
+    token: &str,
+) -> Result<Option<(Uuid, String)>, AppError> {
+    let row = sqlx::query_as::<_, (Uuid, String)>(
+        "SELECT rt.user_id, u.username FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id WHERE rt.token = $1 AND rt.expires_at > NOW()"
+    )
+    .bind(token)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(row)
+}
+
+pub async fn revoke_refresh_token(db: &sqlx::PgPool, token: &str) -> Result<(), AppError> {
+    sqlx::query("DELETE FROM refresh_tokens WHERE token = $1")
+        .bind(token)
+        .execute(db)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(())
+}
+
+pub async fn revoke_user_refresh_tokens(db: &sqlx::PgPool, user_id: Uuid) -> Result<(), AppError> {
+    sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
+        .bind(user_id)
+        .execute(db)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(())
 }
 
 pub fn hash_password(password: &str) -> Result<String, AppError> {
@@ -123,7 +168,7 @@ mod tests {
         let token = create_token(Uuid::new_v4(), "user", SECRET).unwrap();
         let claims = verify_token(&token, SECRET).unwrap();
         assert!(claims.exp > claims.iat);
-        assert_eq!(claims.exp - claims.iat, 3600);
+        assert_eq!(claims.exp - claims.iat, 900);
     }
 
     #[test]

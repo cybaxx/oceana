@@ -3,6 +3,38 @@ import { auth } from '$lib/stores/auth';
 
 const BASE = '/api/v1';
 
+const AUTH_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/refresh'];
+
+let refreshPromise: Promise<boolean> | null = null;
+
+async function attemptRefresh(): Promise<boolean> {
+	const state = get(auth);
+	if (!state.refresh_token) return false;
+
+	try {
+		const res = await fetch(`${BASE}/auth/refresh`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ refresh_token: state.refresh_token })
+		});
+		if (!res.ok) return false;
+		const data = await res.json();
+		auth.setTokens(data.token, data.refresh_token);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function doRefresh(): Promise<boolean> {
+	if (!refreshPromise) {
+		refreshPromise = attemptRefresh().finally(() => {
+			refreshPromise = null;
+		});
+	}
+	return refreshPromise;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
 	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 	const state = get(auth);
@@ -15,6 +47,30 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 		headers,
 		body: body ? JSON.stringify(body) : undefined
 	});
+
+	if (res.status === 401 && state.token && !AUTH_ENDPOINTS.some((ep) => path.startsWith(ep))) {
+		const refreshed = await doRefresh();
+		if (refreshed) {
+			// Retry with new token
+			const newState = get(auth);
+			const retryHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+			if (newState.token) retryHeaders['Authorization'] = `Bearer ${newState.token}`;
+			const retryRes = await fetch(`${BASE}${path}`, {
+				method,
+				headers: retryHeaders,
+				body: body ? JSON.stringify(body) : undefined
+			});
+			if (!retryRes.ok) {
+				const err = await retryRes.json().catch(() => ({ error: retryRes.statusText }));
+				throw new Error(err.error || err.message || retryRes.statusText);
+			}
+			return retryRes.json();
+		} else {
+			auth.logout();
+			if (typeof window !== 'undefined') window.location.href = '/login';
+			throw new Error('Session expired');
+		}
+	}
 
 	if (!res.ok) {
 		if (res.status === 401 && state.token) {
@@ -76,11 +132,29 @@ export const api = {
 		const state = get(auth);
 		const formData = new FormData();
 		formData.append('file', file);
-		const res = await fetch(`${BASE}/upload`, {
-			method: 'POST',
-			headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
-			body: formData
-		});
+
+		const doUpload = async (token: string | null) => {
+			return fetch(`${BASE}/upload`, {
+				method: 'POST',
+				headers: token ? { Authorization: `Bearer ${token}` } : {},
+				body: formData
+			});
+		};
+
+		let res = await doUpload(state.token);
+
+		if (res.status === 401 && state.token) {
+			const refreshed = await doRefresh();
+			if (refreshed) {
+				const newState = get(auth);
+				res = await doUpload(newState.token);
+			} else {
+				auth.logout();
+				if (typeof window !== 'undefined') window.location.href = '/login';
+				throw new Error('Session expired');
+			}
+		}
+
 		if (!res.ok) {
 			const err = await res.json().catch(() => ({ error: res.statusText }));
 			throw new Error(err.error || err.message || res.statusText);

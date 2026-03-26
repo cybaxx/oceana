@@ -33,6 +33,7 @@ export interface PostWithAuthor extends Post {
 export interface AuthResponse {
 	user: User;
 	token: string;
+	refresh_token: string;
 }
 
 export interface Conversation {

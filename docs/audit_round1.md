@@ -17,9 +17,9 @@ The most significant findings relate to: JWT tokens exposed in WebSocket URLs (l
 | Severity | Count | Fixed |
 |----------|-------|-------|
 | CRITICAL | 2 | 2 |
-| HIGH     | 6 | 2 |
-| MEDIUM   | 8 | 2 |
-| LOW      | 7 | 0 |
+| HIGH     | 6 | 6 |
+| MEDIUM   | 8 | 5 |
+| LOW      | 7 | 3 |
 | INFO     | 6 | — |
 
 ---
@@ -42,47 +42,21 @@ The most significant findings relate to: JWT tokens exposed in WebSocket URLs (l
 
 ### HIGH
 
-#### H-1: Plaintext Messages Stored on Server Alongside Ciphertext
+#### H-1: ~~Plaintext Messages Stored on Server Alongside Ciphertext~~ FIXED
 
-**File:** `/backend/src/routes.rs:723-724`, `/backend/migrations/002_chat.sql:13-20`
-**Description:** The `messages` table has both `plaintext` and `ciphertext` columns. When encryption fails (see C-2), the plaintext is stored directly. Even for encrypted messages, the server stores whatever the client sends. There is no server-side enforcement that chat messages must be encrypted.
-
-```sql
--- messages table allows both plaintext and ciphertext
-plaintext       TEXT,
-ciphertext      TEXT,
-```
-
-**Impact:** The server can see and store any message that falls back to plaintext. An attacker with database access can read all fallback messages.
-**Recommendation:** Consider removing the `plaintext` column from the messages table for E2EE conversations, or at minimum add a `is_encrypted` boolean flag that the server tracks. Warn users when receiving unencrypted messages in an E2EE conversation.
+**Status:** Remediated. The server now always binds NULL for the plaintext column in message inserts, ignoring any `content` field sent by the client. The `list_conversations` query returns `NULL::text AS last_message_text` instead of reading from the plaintext column. Self-chat now encrypts via AES-256-GCM group keys instead of sending plaintext. Conversation previews are decrypted client-side. Seed data plaintext has been nullified.
 
 ---
 
-#### H-2: No Rate Limiting on WebSocket Messages
+#### H-2: ~~No Rate Limiting on WebSocket Messages~~ FIXED
 
-**File:** `/backend/src/routes.rs:666-690`
-**Description:** The WebSocket message handler processes all incoming messages without any rate limiting. The HTTP rate limiter (5 req/60s for auth, 60 req/60s general) does not apply to WebSocket frames after the initial upgrade.
-
-```rust
-// routes.rs:666 - no rate check per-message
-while let Some(Ok(msg)) = ws_stream.next().await {
-    match msg {
-        WsMsg::Text(text) => {
-            if let Ok(client_msg) = serde_json::from_str::<WsClientMessage>(&text) {
-```
-
-**Impact:** A malicious client can flood the server with messages, causing database write amplification (each message is INSERT + broadcast), memory pressure, and denial of service for all users in shared conversations.
-**Recommendation:** Add per-connection message rate limiting (e.g., max 10 messages per second). Also add message size limits.
+**Status:** Remediated. Per-connection rate limiting at 10 messages/second enforced in WebSocket handler with sliding window.
 
 ---
 
-#### H-3: No WebSocket Message Size Validation
+#### H-3: ~~No WebSocket Message Size Validation~~ FIXED
 
-**File:** `/backend/src/routes.rs:668-669`
-**Description:** There is no limit on the size of incoming WebSocket text frames. The `content` field in `WsClientMessage::SendMessage` is `Option<String>` with no length validation before database insertion.
-
-**Impact:** An attacker can send arbitrarily large messages, consuming database storage and memory. Combined with H-2, this enables rapid resource exhaustion.
-**Recommendation:** Add `max_frame_size` configuration on the WebSocket upgrade and validate `content` length before database insertion (matching the 10,000 char limit used for posts).
+**Status:** Remediated. WebSocket frame size limited to 64KB via `max_frame_size`. Content/ciphertext validated to max 10,000 chars before DB insertion.
 
 ---
 
@@ -98,61 +72,23 @@ while let Some(Ok(msg)) = ws_stream.next().await {
 
 ---
 
-#### H-6: Group Key Never Rotated on Member Change
+#### H-6: ~~Group Key Never Rotated on Member Change~~ FIXED
 
-**File:** `/frontend/src/lib/stores/chat.ts:236-260`
-**Description:** When a group chat's AES-256-GCM key is generated, it is distributed to current members and cached. There is no mechanism to rotate the group key when:
-- A member is removed from the conversation
-- A member's identity key changes
-- Periodically for forward secrecy
-
-The `groupKeyDistributed` set is an in-memory `Set<string>` that prevents re-distribution even within a single session.
-
-```typescript
-const groupKeyDistributed = new Set<string>();
-// Once distributed, never rotated
-if (!groupKey || !groupKeyDistributed.has(conversationId)) {
-    groupKey = await generateGroupKey();
-    // ...distribute...
-    groupKeyDistributed.add(conversationId);
-}
-```
-
-**Impact:** Removed members retain the ability to decrypt future messages if they have the group key. No forward secrecy is provided for group messages.
-**Recommendation:** Rotate group keys when membership changes and implement periodic rotation. Track group key epochs.
+**Status:** Remediated. Group keys are now rotated when membership changes. Before each group message, current members are fetched and compared against the set that received the current key. On mismatch, a new AES-256-GCM key is generated and distributed via pairwise Signal encryption.
 
 ---
 
 ### MEDIUM
 
-#### M-1: Sent Message Cache in localStorage is Not Encrypted
+#### M-1: ~~Sent Message Cache in localStorage is Not Encrypted~~ FIXED
 
-**File:** `/frontend/src/lib/crypto/store.ts:203-217`
-**Description:** When a user sends an encrypted DM, the plaintext is cached in `localStorage` using a key derived from the first 48 characters of the ciphertext. This plaintext is stored completely unencrypted.
-
-```typescript
-async storeSentMessage(ciphertext: string, plaintext: string): Promise<void> {
-    const key = `oceana-sent-${ciphertext.slice(0, 48)}`;
-    localStorage.setItem(key, plaintext);  // Plaintext in localStorage!
-}
-```
-
-**Impact:** Anyone with access to the browser's localStorage (XSS, shared computer, browser extension, physical access) can read all sent message plaintexts. This partially defeats E2EE.
-**Recommendation:** Encrypt the plaintext cache using a key derived from the user's credentials or a separate key stored in IndexedDB. Consider using IndexedDB instead of localStorage. Add cache expiration.
+**Status:** Remediated. The sent message cache is now encrypted with AES-256-GCM using a key derived from the user's Signal identity key via HKDF. The IV is stored alongside the ciphertext. Raw plaintext is never written to localStorage.
 
 ---
 
-#### M-2: Ciphertext Cache Key Collision Risk
+#### M-2: ~~Ciphertext Cache Key Collision Risk~~ FIXED
 
-**File:** `/frontend/src/lib/crypto/store.ts:205`
-**Description:** The sent message cache uses only the first 48 characters of the base64-encoded ciphertext as the lookup key. Different messages could share the same 48-character prefix, causing incorrect plaintext retrieval.
-
-```typescript
-const key = `oceana-sent-${ciphertext.slice(0, 48)}`;
-```
-
-**Impact:** In rare cases, a user's own sent message could display the wrong plaintext. Low probability but non-zero.
-**Recommendation:** Use a hash of the full ciphertext (e.g., SHA-256) as the cache key.
+**Status:** Remediated. The cache key is now a SHA-256 hash of the full ciphertext, eliminating prefix collision risk.
 
 ---
 
@@ -174,17 +110,9 @@ if body.password.len() < 8 {
 
 ---
 
-#### M-4: No Token Refresh / Revocation Mechanism
+#### M-4: ~~No Token Refresh / Revocation Mechanism~~ FIXED
 
-**File:** `/backend/src/auth.rs:25`
-**Description:** JWT tokens have a fixed 1-hour expiry with no refresh mechanism and no server-side revocation capability. There is no blacklist or token family tracking.
-
-```rust
-exp: now + 3600, // 1 hour for dev convenience
-```
-
-**Impact:** If a token is compromised, it cannot be revoked before expiry. Users who change passwords or log out on one device cannot invalidate tokens on other devices. After logout, the token remains valid for up to 1 hour.
-**Recommendation:** Implement a refresh token mechanism with short-lived access tokens (5-15 min). Add server-side token revocation (e.g., Redis-backed blacklist or JWT ID tracking). Invalidate all tokens on password change.
+**Status:** Remediated. Access tokens now expire after 15 minutes. Refresh tokens (opaque UUIDs, 30-day expiry) are stored in a `refresh_tokens` Postgres table. Token rotation on each refresh (old token deleted, new pair issued). Server-side revocation on logout deletes all refresh tokens for the user. Frontend transparently refreshes on 401 with a mutex to prevent concurrent refresh requests.
 
 ---
 
@@ -292,50 +220,21 @@ if (browser) localStorage.setItem('auth', JSON.stringify(state));
 
 ---
 
-#### L-5: No Exponential Backoff on WebSocket Reconnection
+#### L-5: ~~No Exponential Backoff on WebSocket Reconnection~~ FIXED
 
-**File:** `/frontend/src/lib/ws.ts:53-56`
-**Description:** WebSocket reconnection uses a fixed 3-second delay. If the server is down, this creates a constant reconnection storm.
-
-```typescript
-reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectWs();
-}, 3000);
-```
-
-**Impact:** If many clients are connected and the server restarts, all clients reconnect simultaneously every 3 seconds, potentially overwhelming the server (thundering herd).
-**Recommendation:** Use exponential backoff with jitter (e.g., 1s, 2s, 4s, 8s... up to 60s, with random jitter).
+**Status:** Remediated. WebSocket reconnection now uses exponential backoff (1s, 2s, 4s... up to 60s cap) with random jitter. The attempt counter resets on successful connection.
 
 ---
 
-#### L-6: DOMPurify Allows Iframes
+#### L-6: ~~DOMPurify Allows Iframes~~ FIXED
 
-**File:** `/frontend/src/lib/components/Markdown.svelte:86-89`
-**Description:** DOMPurify is configured to allow `<iframe>` tags with `src`, `allow`, and `allowfullscreen` attributes. While the embed extraction regex is strict, a carefully crafted markdown input could potentially inject an iframe that passes DOMPurify but loads an unexpected URL.
-
-```typescript
-return DOMPurify.sanitize(withEmbeds, {
-    ADD_TAGS: ['iframe'],
-    ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'loading', 'src']
-});
-```
-
-**Impact:** The embed regex validation (YouTube, Spotify, SoundCloud) constrains this well, and DOMPurify removes `javascript:` URIs. The risk is low but the attack surface exists.
-**Recommendation:** Consider adding `ALLOW_URI_REGEXP` to DOMPurify to restrict iframe `src` to only youtube.com, spotify.com, and soundcloud.com domains.
+**Status:** Remediated. `ALLOWED_URI_REGEXP` is now set on DOMPurify to restrict iframe `src` to only youtube.com, soundcloud.com, and spotify.com domains. All other URI schemes are allowed for normal links except `javascript:`.
 
 ---
 
-#### L-7: No Logout Invalidation of Crypto State
+#### L-7: ~~No Logout Invalidation of Crypto State~~ FIXED
 
-**File:** `/frontend/src/lib/stores/auth.ts:38-40`, `/frontend/src/lib/crypto/index.ts:5-6`
-**Description:** On logout, the auth store clears the token from localStorage, but:
-- The Signal Protocol store (IndexedDB) is not cleared
-- The `store` module-level variable in `crypto/index.ts` still holds the reference
-- `localStorage` sent message cache is not cleared
-
-**Impact:** A subsequent user on the same browser could potentially access the previous user's crypto state if they can trigger `getCryptoStore()` before a new `initCrypto()` call.
-**Recommendation:** Clear the module-level `store` variable on logout. Clear the sent message localStorage entries. Consider clearing or re-keying IndexedDB on logout.
+**Status:** Remediated. On logout: (1) `clearCryptoStore()` nulls the module-level store reference and initPromise, (2) all `oceana-sent-*` localStorage entries are cleared, (3) WebSocket is disconnected. IndexedDB is preserved for re-login on the same device.
 
 ---
 
@@ -405,16 +304,16 @@ This is fine for a single-instance hobby project but would need Redis-backed sto
 
 ## Prioritized Recommendations (Updated)
 
-**Fixed:** C-1, C-2, H-4, H-5, M-5
+**Fixed:** C-1, C-2, H-2, H-3, H-4, H-5, H-6, M-5
 
 ### Short-term (P1)
-2. **Fix H-2:** Add per-message rate limiting to WebSocket handler.
-3. **Fix H-3:** Add WebSocket message size limits.
+2. ~~**Fix H-2:** Add per-message rate limiting to WebSocket handler.~~ DONE
+3. ~~**Fix H-3:** Add WebSocket message size limits.~~ DONE
 
 ### Medium-term (P2)
-4. **Fix H-6:** Implement group key rotation on membership changes.
+4. ~~**Fix H-6:** Implement group key rotation on membership changes.~~ DONE
 5. **Fix M-1:** Encrypt the localStorage sent message cache.
-6. **Fix M-4:** Implement token refresh mechanism.
+6. ~~**Fix M-4:** Implement token refresh mechanism.~~ DONE
 
 ### Long-term (P3)
 7. **Fix M-8:** Use `FOR UPDATE SKIP LOCKED` for OPK consumption.

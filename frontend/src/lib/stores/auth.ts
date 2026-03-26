@@ -5,10 +5,11 @@ import type { User } from '$lib/types';
 interface AuthState {
 	user: User | null;
 	token: string | null;
+	refresh_token: string | null;
 }
 
 function createAuthStore() {
-	let initial: AuthState = { user: null, token: null };
+	let initial: AuthState = { user: null, token: null, refresh_token: null };
 
 	if (browser) {
 		const saved = localStorage.getItem('auth');
@@ -23,8 +24,8 @@ function createAuthStore() {
 
 	return {
 		subscribe,
-		login(user: User, token: string) {
-			const state = { user, token };
+		login(user: User, token: string, refresh_token: string) {
+			const state = { user, token, refresh_token };
 			if (browser) localStorage.setItem('auth', JSON.stringify(state));
 			set(state);
 		},
@@ -35,9 +36,25 @@ function createAuthStore() {
 				return state;
 			});
 		},
+		setTokens(token: string, refresh_token: string) {
+			update((s) => {
+				const state = { ...s, token, refresh_token };
+				if (browser) localStorage.setItem('auth', JSON.stringify(state));
+				return state;
+			});
+		},
 		logout() {
-			if (browser) localStorage.removeItem('auth');
-			set({ user: null, token: null });
+			if (browser) {
+				localStorage.removeItem('auth');
+				// Clear sent message cache (L-7)
+				const keysToRemove: string[] = [];
+				for (let i = 0; i < localStorage.length; i++) {
+					const key = localStorage.key(i);
+					if (key?.startsWith('oceana-sent-')) keysToRemove.push(key);
+				}
+				keysToRemove.forEach((k) => localStorage.removeItem(k));
+			}
+			set({ user: null, token: null, refresh_token: null });
 		}
 	};
 }

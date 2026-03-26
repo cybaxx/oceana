@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { get } from 'svelte/store';
 	import { auth } from '$lib/stores/auth';
-	import { initCrypto } from '$lib/crypto';
+	import { initCrypto, clearCryptoStore } from '$lib/crypto';
+	import { disconnectWs } from '$lib/ws';
 	import '../app.css';
 
 	let { children } = $props();
@@ -13,6 +15,16 @@
 	});
 
 	function logout() {
+		disconnectWs();
+		clearCryptoStore();
+		// Best-effort server-side logout to revoke refresh tokens
+		const state = get(auth);
+		if (state.token) {
+			fetch('/api/v1/auth/logout', {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${state.token}` }
+			}).catch(() => {});
+		}
 		auth.logout();
 		window.location.href = '/login';
 	}

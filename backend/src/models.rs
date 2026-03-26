@@ -234,6 +234,19 @@ pub enum WsServerMessage {
 pub struct AuthResponse {
     pub user: User,
     pub token: String,
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RefreshRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RefreshResponse {
+    pub user: User,
+    pub token: String,
+    pub refresh_token: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -515,6 +528,38 @@ mod tests {
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["username"], "nautilus");
         assert_eq!(json["is_bot"], true);
+    }
+
+    #[test]
+    fn auth_response_serializes_with_refresh_token() {
+        let resp = AuthResponse {
+            user: test_user(),
+            token: "jwt-token".into(),
+            refresh_token: "refresh-uuid".into(),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["token"], "jwt-token");
+        assert_eq!(json["refresh_token"], "refresh-uuid");
+        assert!(json.get("user").is_some());
+    }
+
+    #[test]
+    fn refresh_request_deserializes() {
+        let json = r#"{"refresh_token":"some-uuid-token"}"#;
+        let req: RefreshRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.refresh_token, "some-uuid-token");
+    }
+
+    #[test]
+    fn refresh_response_serializes() {
+        let resp = RefreshResponse {
+            user: test_user(),
+            token: "new-jwt".into(),
+            refresh_token: "new-refresh".into(),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["token"], "new-jwt");
+        assert_eq!(json["refresh_token"], "new-refresh");
     }
 
     #[test]

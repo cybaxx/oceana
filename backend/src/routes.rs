@@ -18,6 +18,8 @@ pub fn router() -> Router<AppState> {
         // Auth
         .route("/auth/register", post(register))
         .route("/auth/login", post(login))
+        .route("/auth/refresh", post(refresh))
+        .route("/auth/logout", post(logout))
         // Users
         .route("/users/search", get(search_users))
         .route("/users/:id", get(get_user))
@@ -86,7 +88,8 @@ async fn register(
     })?;
 
     let token = auth::create_token(user.id, &user.username, &state.jwt_secret)?;
-    Ok(Json(AuthResponse { user, token }))
+    let refresh_token = auth::create_refresh_token(&state.db, user.id).await?;
+    Ok(Json(AuthResponse { user, token, refresh_token }))
 }
 
 async fn login(
@@ -104,7 +107,42 @@ async fn login(
     }
 
     let token = auth::create_token(user.id, &user.username, &state.jwt_secret)?;
-    Ok(Json(AuthResponse { user, token }))
+    let refresh_token = auth::create_refresh_token(&state.db, user.id).await?;
+    Ok(Json(AuthResponse { user, token, refresh_token }))
+}
+
+async fn refresh(
+    State(state): State<AppState>,
+    Json(body): Json<RefreshRequest>,
+) -> Result<Json<RefreshResponse>, AppError> {
+    let (user_id, username) = auth::validate_refresh_token(&state.db, &body.refresh_token)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("Invalid or expired refresh token".into()))?;
+
+    // Rotate: delete old token
+    auth::revoke_refresh_token(&state.db, &body.refresh_token).await?;
+
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await?;
+
+    let token = auth::create_token(user_id, &username, &state.jwt_secret)?;
+    let new_refresh_token = auth::create_refresh_token(&state.db, user_id).await?;
+
+    Ok(Json(RefreshResponse {
+        user,
+        token,
+        refresh_token: new_refresh_token,
+    }))
+}
+
+async fn logout(
+    State(state): State<AppState>,
+    auth_user: AuthUser,
+) -> Result<Json<serde_json::Value>, AppError> {
+    auth::revoke_user_refresh_tokens(&state.db, auth_user.user_id).await?;
+    Ok(Json(serde_json::json!({ "status": "logged_out" })))
 }
 
 // --- Users ---
@@ -568,13 +606,13 @@ async fn list_conversations(
     let convs = sqlx::query_as::<_, ConversationWithLastMessage>(
         r#"
         SELECT c.id, c.created_at,
-               m.plaintext AS last_message_text,
+               NULL::text AS last_message_text,
                m.created_at AS last_message_at,
                m.sender_id AS last_message_sender_id
         FROM conversations c
         JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = $1
         LEFT JOIN LATERAL (
-            SELECT plaintext, created_at, sender_id FROM messages
+            SELECT created_at, sender_id FROM messages
             WHERE conversation_id = c.id
             ORDER BY created_at DESC LIMIT 1
         ) m ON true
@@ -830,13 +868,15 @@ async fn handle_send_message(
         return;
     }
 
-    // Store message — encrypted or plaintext
+    // H-1: Never store plaintext — always bind NULL for the plaintext column
+    if content.is_some() && ciphertext.is_none() {
+        tracing::warn!("Message from {sender_id} has content but no ciphertext — storing with NULL plaintext");
+    }
     let message = sqlx::query_as::<_, Message>(
-        "INSERT INTO messages (conversation_id, sender_id, plaintext, ciphertext, nonce, message_type, image_url) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *"
+        "INSERT INTO messages (conversation_id, sender_id, plaintext, ciphertext, nonce, message_type, image_url) VALUES ($1, $2, NULL, $3, $4, $5, $6) RETURNING *"
     )
     .bind(conversation_id)
     .bind(sender_id)
-    .bind(&content)
     .bind(&ciphertext)
     .bind(&nonce)
     .bind(message_type)

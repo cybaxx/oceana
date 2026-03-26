@@ -199,18 +199,64 @@ export class SignalProtocolStore {
 		await idbPut(db, 'identity', 'nextSignedPreKeyId', id);
 	}
 
-	// Sent message plaintext cache — uses localStorage to avoid DB version bumps
+	// Sent message plaintext cache — encrypted with a key derived from identity key
+	private cacheKey: CryptoKey | null = null;
+
+	private async getCacheKey(): Promise<CryptoKey> {
+		if (this.cacheKey) return this.cacheKey;
+		const idKeyPair = await this.getIdentityKeyPair();
+		if (!idKeyPair) throw new Error('No identity key for cache encryption');
+		// Derive a stable AES-GCM key from identity private key via HKDF
+		const rawKey = await crypto.subtle.importKey('raw', idKeyPair.privKey, 'HKDF', false, ['deriveKey']);
+		this.cacheKey = await crypto.subtle.deriveKey(
+			{ name: 'HKDF', hash: 'SHA-256', salt: new TextEncoder().encode('oceana-sent-cache'), info: new TextEncoder().encode('aes-gcm') },
+			rawKey,
+			{ name: 'AES-GCM', length: 256 },
+			false,
+			['encrypt', 'decrypt']
+		);
+		return this.cacheKey;
+	}
+
+	private async hashCacheKey(ciphertext: string): Promise<string> {
+		const data = new TextEncoder().encode(ciphertext);
+		const hash = await crypto.subtle.digest('SHA-256', data);
+		return 'oceana-sent-' + Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+	}
+
 	async storeSentMessage(ciphertext: string, plaintext: string): Promise<void> {
 		try {
-			const key = `oceana-sent-${ciphertext.slice(0, 48)}`;
-			localStorage.setItem(key, plaintext);
+			const storageKey = await this.hashCacheKey(ciphertext);
+			const aesKey = await this.getCacheKey();
+			const iv = crypto.getRandomValues(new Uint8Array(12));
+			const encrypted = await crypto.subtle.encrypt(
+				{ name: 'AES-GCM', iv },
+				aesKey,
+				new TextEncoder().encode(plaintext)
+			);
+			// Store as base64: iv + ciphertext
+			const combined = new Uint8Array(iv.length + encrypted.byteLength);
+			combined.set(iv);
+			combined.set(new Uint8Array(encrypted), iv.length);
+			localStorage.setItem(storageKey, btoa(String.fromCharCode(...combined)));
 		} catch { /* storage full or unavailable */ }
 	}
 
 	async loadSentMessage(ciphertext: string): Promise<string | undefined> {
 		try {
-			const key = `oceana-sent-${ciphertext.slice(0, 48)}`;
-			return localStorage.getItem(key) ?? undefined;
+			const storageKey = await this.hashCacheKey(ciphertext);
+			const stored = localStorage.getItem(storageKey);
+			if (!stored) return undefined;
+			const aesKey = await this.getCacheKey();
+			const combined = Uint8Array.from(atob(stored), c => c.charCodeAt(0));
+			const iv = combined.slice(0, 12);
+			const data = combined.slice(12);
+			const decrypted = await crypto.subtle.decrypt(
+				{ name: 'AES-GCM', iv },
+				aesKey,
+				data
+			);
+			return new TextDecoder().decode(decrypted);
 		} catch {
 			return undefined;
 		}
@@ -225,6 +271,11 @@ export class SignalProtocolStore {
 	async loadGroupKey(groupId: string): Promise<CryptoKey | undefined> {
 		const db = this.ensureDB();
 		return idbGet(db, 'groupKeys', groupId);
+	}
+
+	async deleteGroupKey(groupId: string): Promise<void> {
+		const db = this.ensureDB();
+		await idbDelete(db, 'groupKeys', groupId);
 	}
 
 	private arrayBuffersEqual(a: ArrayBuffer, b: ArrayBuffer): boolean {

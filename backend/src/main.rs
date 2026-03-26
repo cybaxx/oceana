@@ -59,6 +59,7 @@ async fn main() {
         include_str!("../migrations/007_signal_keys.sql"),
         include_str!("../migrations/008_signing_key.sql"),
         include_str!("../migrations/009_avatar.sql"),
+        include_str!("../migrations/010_refresh_tokens.sql"),
     ];
 
     if std::env::var("SEED_DATA").as_deref() == Ok("true") {

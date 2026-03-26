@@ -166,7 +166,24 @@ export function cleanupChatListeners() {
 
 export async function loadConversations() {
 	const convs = (await api.listConversations()) as Conversation[];
-	conversations.set(convs);
+	// Decrypt previews client-side: fetch last message for each conversation
+	const withPreviews = await Promise.all(
+		convs.map(async (conv) => {
+			if (!conv.last_message_at) return conv;
+			try {
+				const res = (await api.getMessages(conv.id)) as {
+					data: Message[];
+					next_cursor: string | null;
+				};
+				if (res.data.length > 0) {
+					const decrypted = await tryDecrypt(res.data[0]);
+					return { ...conv, last_message_text: decrypted.plaintext || 'Encrypted message' };
+				}
+			} catch { /* ignore preview failure */ }
+			return conv;
+		})
+	);
+	conversations.set(withPreviews);
 }
 
 export async function loadMessages(conversationId: string, cursor?: string) {
@@ -189,8 +206,8 @@ export async function loadMessages(conversationId: string, cursor?: string) {
 
 // Session cache to avoid re-fetching bundles
 const sessionInitialized = new Set<string>();
-// Track which groups have had keys distributed this session
-const groupKeyDistributed = new Set<string>();
+// Track which members received the current group key per conversation
+const groupKeyMembers = new Map<string, string[]>(); // conversationId → sorted member IDs
 
 async function ensureSession(recipientUserId: string): Promise<void> {
 	if (sessionInitialized.has(recipientUserId)) return;
@@ -228,15 +245,26 @@ export async function sendEncryptedMessage(
 	// Group chat (3+ members): use AES-256-GCM shared key
 	if (recipientIds.length > 2) {
 		try {
-			// Ensure group key exists; if not, generate and distribute
+			// Fetch current members to detect membership changes
+			const currentMembers = await api.getConversationMembers(conversationId);
+			const sortedMembers = [...currentMembers].sort();
+			const previousMembers = groupKeyMembers.get(conversationId);
+
+			// Check if rotation needed: no key, or membership changed
 			let groupKey = await store.loadGroupKey(conversationId);
-			if (!groupKey) {
+			const needsRotation = !groupKey ||
+				!previousMembers ||
+				previousMembers.length !== sortedMembers.length ||
+				previousMembers.some((m, i) => m !== sortedMembers[i]);
+
+			if (needsRotation) {
 				groupKey = await generateGroupKey();
 				await store.storeGroupKey(conversationId, groupKey);
 				const keyB64 = await exportGroupKey(groupKey);
+				const currentOthers = currentMembers.filter((id) => id !== currentUserId);
 
-				// Distribute key to each member via pairwise Signal session
-				for (const recipientId of others) {
+				// Distribute key to each current member via pairwise Signal session
+				for (const recipientId of currentOthers) {
 					await ensureSession(recipientId);
 					const { ciphertext, messageType: _mt } = await encryptMessage(store, recipientId, keyB64);
 					sendWsMessage({
@@ -249,11 +277,11 @@ export async function sendEncryptedMessage(
 						message_type: MSG_TYPE_GROUP_KEY_DISTRIBUTION
 					});
 				}
-				groupKeyDistributed.add(conversationId);
+				groupKeyMembers.set(conversationId, sortedMembers);
 			}
 
 			// Encrypt message with group key
-			const { ciphertext, nonce } = await encryptGroupMessage(groupKey, plaintext);
+			const { ciphertext, nonce } = await encryptGroupMessage(groupKey!, plaintext);
 			sendWsMessage({
 				type: 'send_message',
 				conversation_id: conversationId,
@@ -292,13 +320,22 @@ export async function sendEncryptedMessage(
 		}
 	}
 
-	// Self-chat fallback
+	// Self-chat: encrypt with group key (sender can decrypt own group messages)
 	if (others.length === 0) {
+		let groupKey = await store.loadGroupKey(conversationId);
+		if (!groupKey) {
+			groupKey = await generateGroupKey();
+			await store.storeGroupKey(conversationId, groupKey);
+		}
+		const { ciphertext, nonce } = await encryptGroupMessage(groupKey, plaintext);
 		sendWsMessage({
 			type: 'send_message',
 			conversation_id: conversationId,
-			content: plaintext,
-			image_url: imageUrl ?? null
+			content: null,
+			image_url: imageUrl ?? null,
+			ciphertext,
+			nonce,
+			message_type: MSG_TYPE_GROUP_MESSAGE
 		});
 	}
 }

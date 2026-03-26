@@ -9,6 +9,7 @@ let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let handlers: MessageHandler[] = [];
 let connecting = false;
+let reconnectAttempts = 0;
 
 function getWsUrl(ticket: string): string {
 	const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -33,6 +34,7 @@ export async function connectWs() {
 	connecting = false;
 
 	ws.onopen = () => {
+		reconnectAttempts = 0;
 		if (reconnectTimer) {
 			clearTimeout(reconnectTimer);
 			reconnectTimer = null;
@@ -62,10 +64,14 @@ function scheduleReconnect() {
 	if (reconnectTimer) return;
 	const state = get(auth);
 	if (!state.token) return;
+	const baseDelay = Math.min(1000 * Math.pow(2, reconnectAttempts), 60000);
+	const jitter = Math.random() * baseDelay * 0.5;
+	const delay = baseDelay + jitter;
+	reconnectAttempts++;
 	reconnectTimer = setTimeout(() => {
 		reconnectTimer = null;
 		connectWs();
-	}, 3000);
+	}, delay);
 }
 
 export function disconnectWs() {
