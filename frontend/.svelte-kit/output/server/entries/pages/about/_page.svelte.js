@@ -1,4 +1,4 @@
-import { h as head } from "../../../chunks/index2.js";
+import { i as head } from "../../../chunks/index2.js";
 import { M as Markdown } from "../../../chunks/Markdown.js";
 function _page($$renderer) {
   head("cwls5q", $$renderer, ($$renderer2) => {

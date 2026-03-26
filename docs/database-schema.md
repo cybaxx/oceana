@@ -18,6 +18,7 @@ CREATE TABLE users (
     password_hash   TEXT NOT NULL,
     display_name    VARCHAR(64),
     bio             TEXT,
+    avatar_url      TEXT,
     is_bot          BOOLEAN NOT NULL DEFAULT false,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- Signal Protocol fields (added in migration 007, 008)
@@ -32,6 +33,7 @@ CREATE TABLE users (
 Notes:
 - `email` is never serialized in API responses
 - `password_hash` is Argon2id, never serialized
+- `avatar_url` stores the path to the user's profile avatar image
 - Signal fields are populated when the user uploads a key bundle
 - `signing_key` is the Ed25519 public key used for post signature verification
 
@@ -159,6 +161,25 @@ CREATE TABLE prekeys (
 
 ---
 
+### refresh_tokens
+
+JWT refresh tokens for token rotation. Tokens are single-use and revoked on logout.
+
+```sql
+CREATE TABLE refresh_tokens (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token      TEXT UNIQUE NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
+CREATE INDEX idx_refresh_tokens_token ON refresh_tokens(token);
+```
+
+---
+
 ## Migration History
 
 | File | Description |
@@ -171,6 +192,8 @@ CREATE TABLE prekeys (
 | `006_emoji_reactions.sql` | Drops CHECK constraint, allows any emoji |
 | `007_signal_keys.sql` | Signal Protocol fields on users, prekeys table, post signature, message_type |
 | `008_signing_key.sql` | Adds `signing_key` to users for Ed25519 |
+| `009_avatar.sql` | Adds `avatar_url` to users for profile images |
+| `010_refresh_tokens.sql` | Creates `refresh_tokens` table for JWT rotation |
 | `999_seed.sql` | Test data (only runs when `SEED_DATA=true` env var is set) |
 
 Migrations are idempotent — they use `IF NOT EXISTS` and `ON CONFLICT` patterns. Errors are logged (via `tracing::warn!`) but don't halt startup. Each migration file is split by `;` and each statement is executed individually (sqlx doesn't support multi-statement queries).

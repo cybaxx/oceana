@@ -14,6 +14,33 @@
 	let submittingReply = $state(false);
 	let loadingReplies = $state(false);
 	let sigStatus = $state<'verified' | 'unverified' | 'checking' | null>(null);
+	let editingPost = $state(false);
+	let editContent = $state('');
+
+	function startEdit() {
+		if (!post) return;
+		editingPost = true;
+		editContent = post.content;
+	}
+
+	function cancelEdit() {
+		editingPost = false;
+		editContent = '';
+	}
+
+	async function saveEdit() {
+		if (!post || !editContent.trim()) return;
+		try {
+			const updated = await api.updatePost(post.id, editContent.trim()) as PostWithAuthor;
+			post.content = updated.content;
+			post.updated_at = updated.updated_at;
+			post = post;
+			editingPost = false;
+			editContent = '';
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
 
 	const EMOJI_GRID = [
 		'🔥', '🧠', '💀', '⚡', '🌊', '🫧',
@@ -148,9 +175,29 @@
 				{#if post.author_display_name}
 					<span class="text-xs text-[var(--terminal-dim)]">{post.author_display_name}</span>
 				{/if}
-				<span class="ml-auto text-xs text-[var(--terminal-dim)]">{timeAgo(post.created_at)}</span>
+				<span class="ml-auto flex items-center gap-1.5 text-xs text-[var(--terminal-dim)]">
+				{#if post.updated_at}<span class="text-[10px] italic">(edited)</span>{/if}
+				{timeAgo(post.created_at)}
+				{#if post.author_id === $auth.user?.id}
+					<button onclick={startEdit} class="text-[var(--terminal-dim)] hover:text-[var(--ocean-300)] transition-colors" title="Edit post">
+						<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"/></svg>
+					</button>
+				{/if}
+			</span>
 			</div>
-			{#if parsed.text}
+			{#if editingPost}
+				<div class="mt-2">
+					<textarea
+						bind:value={editContent}
+						rows="3"
+						class="w-full resize-none rounded border border-[var(--ocean-400)] bg-[var(--ocean-950)] p-3 text-sm text-[var(--ocean-100)] focus:outline-none focus:shadow-[0_0_8px_var(--terminal-glow)]"
+					></textarea>
+					<div class="mt-1 flex gap-2 justify-end">
+						<button onclick={cancelEdit} class="rounded border border-[var(--terminal-border)] px-3 py-1 text-xs text-[var(--terminal-dim)] hover:text-[var(--ocean-100)]">cancel</button>
+						<button onclick={saveEdit} disabled={!editContent.trim()} class="rounded border border-[var(--ocean-400)] px-3 py-1 text-xs text-[var(--ocean-300)] hover:bg-[var(--ocean-400)]/10 disabled:opacity-30">save</button>
+					</div>
+				</div>
+			{:else if parsed.text}
 				<div class="text-sm leading-relaxed text-[var(--ocean-100)]"><Markdown content={parsed.text} /></div>
 			{/if}
 			{#if parsed.imageUrl}

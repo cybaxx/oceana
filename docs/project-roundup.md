@@ -27,7 +27,7 @@ The initial architecture doc laid out an ambitious target: PostgreSQL + Neo4j + 
 | Frontend (TypeScript) | 12 source files | 1,378 |
 | Frontend (Svelte) | 12 components/pages | 2,456 |
 | Frontend tests | 7 test files | 1,735 |
-| SQL migrations | 9 files | 131 |
+| SQL migrations | 11 files | ~155 |
 | Scripts | 2 (bot-activity, test.sh) | 984 |
 | Documentation | 13 markdown files | 3,861 |
 | **Total application code** | | **~13,250** |
@@ -35,17 +35,17 @@ The initial architecture doc laid out an ambitious target: PostgreSQL + Neo4j + 
 ### What's Built
 
 **Backend — Rust/Axum (fully functional)**
-- 29 REST endpoints + 1 WebSocket endpoint
-- Argon2id password hashing, JWT auth (HS256, 1-hour expiry)
+- 33+ REST endpoints + 1 WebSocket endpoint
+- Argon2id password hashing (configurable params, OWASP defaults), JWT auth (HS256, 15-min access tokens + 30-day refresh tokens)
 - Full CRUD: users, posts, reactions, follows, conversations, messages
 - Cursor-based pagination on feed, replies, and messages
 - Signal Protocol key bundle management (upload, fetch, OPK rotation)
 - File uploads with MIME validation and path traversal protection
-- Per-IP rate limiting (auth 5/min, uploads 10/min, general 60/min)
+- Per-IP rate limiting (auth 5/min, key bundles 20/min, uploads 10/min, general 60/min)
 - Security headers (CSP, X-Frame-Options, nosniff, Referrer-Policy)
 - WebSocket with ticket-based auth (30s one-time tickets)
 - Connection manager with 5 connections/user cap
-- 104 unit tests passing
+- 114 unit tests passing
 
 **Frontend — SvelteKit/Svelte 5 (fully functional)**
 - 9 pages: feed, login, register, settings, profile, post detail, chat list, chat, about
@@ -56,7 +56,7 @@ The initial architecture doc laid out an ambitious target: PostgreSQL + Neo4j + 
 - Markdown rendering with syntax highlighting and media embeds
 - Dark ocean terminal theme (JetBrains Mono, cyan glow, scanlines)
 - Auto-reconnecting WebSocket with ticket-based auth
-- 86 unit tests passing
+- 99 unit tests passing
 
 **DevOps & Testing**
 - Docker Compose (postgres + backend + frontend) — one command startup
@@ -77,7 +77,7 @@ The initial architecture doc laid out an ambitious target: PostgreSQL + Neo4j + 
 
 **Security Posture**
 - Two security audits performed (61 total findings)
-- 15 findings remediated (including CORS lockdown, WS ticket auth, rate limiting, body limits, secrets externalized, connection caps)
+- 26+ findings remediated across two audits (including CORS lockdown, WS ticket auth, rate limiting, body limits, secrets externalized, connection caps, token refresh, Argon2 hardening, email validation, encryption fallback fix, group key rotation)
 - No SQL injection (parameterized queries throughout)
 - No XSS in normal flow (isomorphic-dompurify on all paths)
 - Passwords never serialized in API responses
@@ -92,7 +92,7 @@ The initial architecture doc laid out an ambitious target: PostgreSQL + Neo4j + 
 | 4. Real-Time Chat | **COMPLETE** | WebSocket, connection manager, typing indicators, message history |
 | 5. E2E Encryption | **COMPLETE** | Signal Protocol (X3DH + Double Ratchet), group E2EE, Ed25519 signing, safety numbers |
 | 6. Graph Database | **NOT STARTED** | Neo4j integration planned |
-| 7. Hardening | **IN PROGRESS** | Rate limiting, security headers, tests done; CI, token refresh, WS limits remaining |
+| 7. Hardening | **IN PROGRESS** | Rate limiting, security headers, tests, token refresh, WS limits, Argon2 config done; CI remaining |
 
 ---
 
@@ -108,14 +108,14 @@ The initial architecture doc laid out an ambitious target: PostgreSQL + Neo4j + 
 - Exponential backoff on WebSocket reconnect
 
 **Security closure — close the remaining audit findings:**
-- Remove silent plaintext fallback (the #1 remaining E2EE issue — chat should fail loudly, not send unencrypted)
-- WebSocket message size validation and per-message rate limiting
-- Group key rotation when members are added/removed
-- Password max length cap (prevent Argon2 DoS)
-- Token refresh/revocation mechanism (short-lived access tokens + refresh flow)
+- ~~Remove silent plaintext fallback~~ DONE
+- ~~WebSocket message size validation and per-message rate limiting~~ DONE
+- ~~Group key rotation when members are added/removed~~ DONE
+- ~~Password max length cap~~ DONE
+- ~~Token refresh/revocation mechanism~~ DONE
 
 **CI pipeline:**
-- Run the 104 backend tests + 86 frontend tests + integration suite on every PR
+- Run the 114 backend tests + 99 frontend tests + integration suite on every PR
 - Block merge on failure
 
 ### Medium-Term (Next Month)
@@ -189,15 +189,15 @@ The initial architecture doc laid out an ambitious target: PostgreSQL + Neo4j + 
 |--------|-------|
 | Days of development | 20 |
 | Commits | 12 |
-| Backend tests | 104 |
-| Frontend tests | 86 |
-| API endpoints | 30 |
+| Backend tests | 114 |
+| Frontend tests | 99 |
+| API endpoints | 33+ |
 | Frontend pages | 9 |
-| Database tables | 7 |
-| SQL migrations | 9 |
+| Database tables | 8 |
+| SQL migrations | 11 |
 | Security findings identified | 61 |
-| Security findings fixed | 15 |
-| Documentation files | 14 |
+| Security findings fixed | 26+ |
+| Documentation files | 15 |
 | Lines of application code | ~13,250 |
 | Lines of documentation | ~3,860 |
 | Bot-generated test posts | 36 (all Ed25519 signed) |

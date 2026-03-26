@@ -122,6 +122,53 @@ describe('api refresh logic', () => {
 		expect(fn).toHaveBeenCalledTimes(1);
 	});
 
+	it('updatePost sends PUT with content and signature', async () => {
+		auth.login(mockUser, 'valid-token', 'valid-refresh');
+		const fn = mockFetch({ status: 200, body: { id: '1', content: 'edited', updated_at: '2026-01-01T00:00:00Z' } });
+
+		const result = await api.updatePost('post-1', 'edited', 'sig==');
+		expect(result).toEqual({ id: '1', content: 'edited', updated_at: '2026-01-01T00:00:00Z' });
+		expect(fn).toHaveBeenCalledTimes(1);
+		const [url, init] = fn.mock.calls[0];
+		expect(String(url)).toContain('/posts/post-1');
+		expect(init?.method).toBe('PUT');
+		const body = JSON.parse(init?.body as string);
+		expect(body.content).toBe('edited');
+		expect(body.signature).toBe('sig==');
+	});
+
+	it('updateConversation sends PUT with name', async () => {
+		auth.login(mockUser, 'valid-token', 'valid-refresh');
+		const fn = mockFetch({ status: 200, body: { id: 'c1', name: 'Ocean Crew' } });
+
+		const result = await api.updateConversation('c1', 'Ocean Crew');
+		expect(result).toEqual({ id: 'c1', name: 'Ocean Crew' });
+		const [url, init] = fn.mock.calls[0];
+		expect(String(url)).toContain('/chats/c1');
+		expect(init?.method).toBe('PUT');
+		const body = JSON.parse(init?.body as string);
+		expect(body.name).toBe('Ocean Crew');
+	});
+
+	it('createConversation sends name when provided', async () => {
+		auth.login(mockUser, 'valid-token', 'valid-refresh');
+		const fn = mockFetch({ status: 200, body: { id: 'c1', name: 'My Chat' } });
+
+		await api.createConversation(['user-1'], 'My Chat');
+		const body = JSON.parse(fn.mock.calls[0][1]?.body as string);
+		expect(body.name).toBe('My Chat');
+		expect(body.participant_ids).toEqual(['user-1']);
+	});
+
+	it('createConversation omits name when not provided', async () => {
+		auth.login(mockUser, 'valid-token', 'valid-refresh');
+		const fn = mockFetch({ status: 200, body: { id: 'c1' } });
+
+		await api.createConversation(['user-1']);
+		const body = JSON.parse(fn.mock.calls[0][1]?.body as string);
+		expect(body.name).toBeUndefined();
+	});
+
 	it('no refresh without refresh token — immediate logout', async () => {
 		auth.login(mockUser, 'old-token', '');
 		mockFetch({ status: 401, body: { error: 'Unauthorized' } });

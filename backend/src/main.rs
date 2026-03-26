@@ -60,6 +60,8 @@ async fn main() {
         include_str!("../migrations/008_signing_key.sql"),
         include_str!("../migrations/009_avatar.sql"),
         include_str!("../migrations/010_refresh_tokens.sql"),
+        include_str!("../migrations/011_post_updated_at.sql"),
+        include_str!("../migrations/012_conversation_name.sql"),
     ];
 
     if std::env::var("SEED_DATA").as_deref() == Ok("true") {
@@ -138,6 +140,8 @@ async fn rate_limit_middleware(
 
     let (max_requests, window_secs) = if path.starts_with("/api/v1/auth/") {
         (5u32, 60u64)
+    } else if path.starts_with("/api/v1/keys/bundle/") {
+        (20, 60)
     } else if path == "/api/v1/upload" {
         (10, 60)
     } else {

@@ -76,6 +76,9 @@ CORS_ORIGIN=http://localhost:5173
 | `JWT_SECRET` | Yes | — | Secret for signing JWT tokens (32+ chars, validated on startup) |
 | `CORS_ORIGIN` | Yes | `http://localhost:5173` | Allowed CORS origin |
 | `SEED_DATA` | No | `false` | Set to `true` to load test data on startup |
+| `ARGON2_M_COST` | No | `47104` | Argon2 memory cost in KiB (OWASP default) |
+| `ARGON2_T_COST` | No | `1` | Argon2 time cost / iterations |
+| `ARGON2_P_COST` | No | `1` | Argon2 parallelism |
 
 ### Frontend
 
@@ -141,6 +144,7 @@ Built-in per-IP rate limiting:
 | Endpoint Pattern | Limit |
 |-----------------|-------|
 | `/api/v1/auth/*` | 5 requests/minute |
+| `/api/v1/keys/bundle/*` | 20 requests/minute |
 | `/api/v1/upload` | 10 requests/minute |
 | All other endpoints | 60 requests/minute |
 
@@ -154,7 +158,7 @@ The current setup is for development. For production:
 - Set `CORS_ORIGIN` to your frontend domain (e.g., `https://oceana.io`)
 - Do NOT set `SEED_DATA=true`
 - Add a reverse proxy (Caddy/Nginx) for TLS termination
-- Tune Argon2 password hashing parameters for production workload
+- Tune Argon2 parameters via `ARGON2_M_COST`/`ARGON2_T_COST`/`ARGON2_P_COST` env vars (defaults are already OWASP-recommended)
 - Migrate JWT token storage from localStorage to httpOnly cookies
 - Set up proper log aggregation
 - Consider external PostgreSQL for data durability

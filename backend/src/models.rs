@@ -28,6 +28,7 @@ pub struct Post {
     pub parent_id: Option<Uuid>,
     pub signature: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 // --- Chat database row types ---
@@ -36,6 +37,7 @@ pub struct Post {
 pub struct Conversation {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -77,6 +79,7 @@ pub struct MessageWithSender {
 pub struct ConversationWithLastMessage {
     pub id: Uuid,
     pub created_at: DateTime<Utc>,
+    pub name: Option<String>,
     pub last_message_text: Option<String>,
     pub last_message_at: Option<DateTime<Utc>>,
     pub last_message_sender_id: Option<Uuid>,
@@ -170,6 +173,18 @@ pub struct ReactionCount {
 #[derive(Debug, Deserialize)]
 pub struct CreateConversationRequest {
     pub participant_ids: Vec<Uuid>,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdatePostRequest {
+    pub content: String,
+    pub signature: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateConversationRequest {
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -347,6 +362,7 @@ mod tests {
             parent_id: None,
             signature: None,
             created_at: Utc::now(),
+            updated_at: None,
         };
         let pwa = PostWithAuthor {
             post,
@@ -378,6 +394,7 @@ mod tests {
             parent_id: None,
             signature: None,
             created_at: Utc::now(),
+            updated_at: None,
         };
         let pwa = PostWithAuthor {
             post,
@@ -412,6 +429,7 @@ mod tests {
             parent_id: None,
             signature: None,
             created_at: Utc::now(),
+            updated_at: None,
         };
         let pwa = PostWithAuthor {
             post,
@@ -476,6 +494,7 @@ mod tests {
             parent_id: None,
             signature: Some("sig==".into()),
             created_at: Utc::now(),
+            updated_at: None,
         };
         let pwa = PostWithAuthor {
             post,
@@ -707,6 +726,118 @@ mod tests {
         assert_eq!(json["type"], "new_message");
         assert_eq!(json["message"]["image_url"], "/api/v1/uploads/photo.png");
         assert_eq!(json["sender_username"], "jellyfish");
+    }
+
+    #[test]
+    fn update_post_request_deserializes() {
+        let json = r#"{"content":"edited content"}"#;
+        let req: UpdatePostRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.content, "edited content");
+        assert!(req.signature.is_none());
+    }
+
+    #[test]
+    fn update_post_request_with_signature() {
+        let json = r#"{"content":"edited","signature":"newsig=="}"#;
+        let req: UpdatePostRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.content, "edited");
+        assert_eq!(req.signature.unwrap(), "newsig==");
+    }
+
+    #[test]
+    fn update_conversation_request_deserializes() {
+        let json = r#"{"name":"Ocean Crew"}"#;
+        let req: UpdateConversationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.name.unwrap(), "Ocean Crew");
+    }
+
+    #[test]
+    fn update_conversation_request_null_name() {
+        let json = r#"{"name":null}"#;
+        let req: UpdateConversationRequest = serde_json::from_str(json).unwrap();
+        assert!(req.name.is_none());
+    }
+
+    #[test]
+    fn create_conversation_request_with_name() {
+        let json = r#"{"participant_ids":["550e8400-e29b-41d4-a716-446655440000"],"name":"My Chat"}"#;
+        let req: CreateConversationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.participant_ids.len(), 1);
+        assert_eq!(req.name.unwrap(), "My Chat");
+    }
+
+    #[test]
+    fn create_conversation_request_without_name() {
+        let json = r#"{"participant_ids":["550e8400-e29b-41d4-a716-446655440000"]}"#;
+        let req: CreateConversationRequest = serde_json::from_str(json).unwrap();
+        assert!(req.name.is_none());
+    }
+
+    #[test]
+    fn post_serializes_updated_at() {
+        let post = Post {
+            id: Uuid::new_v4(),
+            author_id: Uuid::new_v4(),
+            content: "edited".into(),
+            parent_id: None,
+            signature: None,
+            created_at: Utc::now(),
+            updated_at: Some(Utc::now()),
+        };
+        let json = serde_json::to_value(&post).unwrap();
+        assert!(json["updated_at"].is_string());
+    }
+
+    #[test]
+    fn post_serializes_updated_at_null() {
+        let post = Post {
+            id: Uuid::new_v4(),
+            author_id: Uuid::new_v4(),
+            content: "original".into(),
+            parent_id: None,
+            signature: None,
+            created_at: Utc::now(),
+            updated_at: None,
+        };
+        let json = serde_json::to_value(&post).unwrap();
+        assert!(json["updated_at"].is_null());
+    }
+
+    #[test]
+    fn conversation_serializes_with_name() {
+        let conv = Conversation {
+            id: Uuid::new_v4(),
+            created_at: Utc::now(),
+            name: Some("Ocean Crew".into()),
+        };
+        let json = serde_json::to_value(&conv).unwrap();
+        assert_eq!(json["name"], "Ocean Crew");
+    }
+
+    #[test]
+    fn conversation_serializes_without_name() {
+        let conv = Conversation {
+            id: Uuid::new_v4(),
+            created_at: Utc::now(),
+            name: None,
+        };
+        let json = serde_json::to_value(&conv).unwrap();
+        assert!(json["name"].is_null());
+    }
+
+    #[test]
+    fn conversation_with_last_message_includes_name() {
+        let conv = ConversationWithLastMessage {
+            id: Uuid::new_v4(),
+            created_at: Utc::now(),
+            name: Some("Deep Sea".into()),
+            last_message_text: Some("hello".into()),
+            last_message_at: Some(Utc::now()),
+            last_message_sender_id: Some(Uuid::new_v4()),
+        };
+        let json = serde_json::to_value(&conv).unwrap();
+        assert_eq!(json["name"], "Deep Sea");
+        assert_eq!(json["last_message_text"], "hello");
     }
 
     #[test]

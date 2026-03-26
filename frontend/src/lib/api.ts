@@ -110,6 +110,8 @@ export const api = {
 	getReplies: (id: string) => request('GET', `/posts/${id}/replies`),
 	getPost: (id: string) => request('GET', `/posts/${id}`),
 	deletePost: (id: string) => request('DELETE', `/posts/${id}`),
+	updatePost: (id: string, content: string, signature?: string) =>
+		request('PUT', `/posts/${id}`, { content, signature }),
 	reactToPost: (id: string, kind: string) => request('POST', `/posts/${id}/react`, { kind }),
 	unreactToPost: (id: string) => request('DELETE', `/posts/${id}/react`),
 
@@ -123,8 +125,11 @@ export const api = {
 	},
 
 	// Chat
-	createConversation: (participant_ids: string[]) =>
-		request('POST', '/chats', { participant_ids }),
+	createConversation: (participant_ids: string[], name?: string) =>
+		request('POST', '/chats', { participant_ids, name }),
+
+	updateConversation: (id: string, name: string | null) =>
+		request('PUT', `/chats/${id}`, { name }),
 
 	listConversations: () => request('GET', '/chats'),
 

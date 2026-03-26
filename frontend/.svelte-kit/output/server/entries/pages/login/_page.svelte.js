@@ -1,4 +1,4 @@
-import { a as attr, e as escape_html } from "../../../chunks/index2.js";
+import { d as attr, f as escape_html } from "../../../chunks/index2.js";
 import "../../../chunks/auth.js";
 import "@sveltejs/kit/internal";
 import "../../../chunks/exports.js";
@@ -11,7 +11,7 @@ function _page($$renderer, $$props) {
     let email = "";
     let password = "";
     let submitting = false;
-    $$renderer2.push(`<div class="mx-auto mt-16 max-w-sm"><div class="rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-6"><div class="mb-6"><div class="mb-1 text-xs text-[var(--terminal-dim)]">~/auth</div> <h1 class="text-lg font-bold text-[var(--ocean-300)]">login</h1></div> `);
+    $$renderer2.push(`<div class="mx-auto mt-16 max-w-sm"><div class="login-card rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-6"><div class="mb-6"><div class="mb-1 text-xs text-[var(--terminal-dim)]">~/auth</div> <h1 class="text-lg font-bold text-[var(--ocean-300)]">login</h1></div> `);
     {
       $$renderer2.push("<!--[-1-->");
     }

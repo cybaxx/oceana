@@ -1,12 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
+	import { page } from '$app/stores';
 	import { auth } from '$lib/stores/auth';
+	import { bloomMode } from '$lib/stores/bloom';
 	import { initCrypto, clearCryptoStore } from '$lib/crypto';
 	import { disconnectWs } from '$lib/ws';
+	import BloomBackground from '$lib/components/BloomBackground.svelte';
+	import BloomToggle from '$lib/components/BloomToggle.svelte';
 	import '../app.css';
 
 	let { children } = $props();
+
+	let isBloomRoute = $derived($page.url.pathname === '/' || $page.url.pathname === '/login');
 
 	onMount(() => {
 		if ($auth.user) {
@@ -30,9 +36,14 @@
 	}
 </script>
 
-<div class="min-h-screen bg-[var(--ocean-950)]">
+{#if isBloomRoute}
+	<BloomBackground />
+	<BloomToggle />
+{/if}
+
+<div class="relative z-10 min-h-screen {isBloomRoute && $bloomMode ? 'bloom-active bg-transparent' : 'bg-[var(--ocean-950)]'}">
 	<!-- Nav -->
-	<header class="sticky top-0 z-10 border-b border-[var(--terminal-border)] bg-[var(--ocean-900)]/90 backdrop-blur">
+	<header class="sticky top-0 z-10 border-b border-[var(--terminal-border)] {isBloomRoute && $bloomMode ? 'bg-[var(--ocean-900)]/70' : 'bg-[var(--ocean-900)]/90'} backdrop-blur">
 		<nav class="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
 			<a href="/" class="group flex items-center gap-2 text-lg font-bold tracking-tight text-[var(--ocean-300)] no-underline">
 				<span class="text-[var(--terminal-dim)]">~/</span>oceana

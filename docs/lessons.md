@@ -171,19 +171,23 @@ pub struct AppState {
 ```rust
 pub fn hash_password(password: &str) -> Result<String, AppError> {
     let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+    // Parameters configurable via ARGON2_M_COST, ARGON2_T_COST, ARGON2_P_COST env vars
+    // Defaults: OWASP-recommended m=47104 (46MB), t=1, p=1
+    let params = Params::new(m_cost, t_cost, p_cost, None)?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    argon2.hash_password(password.as_bytes(), &salt)
         .map(|h| h.to_string())
         .map_err(|e| AppError::Internal(e.to_string()))
 }
 
 pub fn verify_password(password: &str, hash: &str) -> Result<bool, AppError> {
     let parsed = PasswordHash::new(hash).map_err(|e| AppError::Internal(e.to_string()))?;
+    // Argon2::default() reads params from the stored hash — auto-handles old and new hashes
     Ok(Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok())
 }
 ```
 
-**Security note:** The `Argon2::default()` parameters are intentionally low for dev speed. Production should tune memory (19+ MiB), iterations (2+), and parallelism based on server hardware.
+**Security note:** Argon2 parameters are configurable via environment variables (`ARGON2_M_COST`, `ARGON2_T_COST`, `ARGON2_P_COST`), defaulting to OWASP-recommended values. `verify_password` reads params from the stored hash string, so old hashes with different params continue to verify correctly.
 
 **Exercise:**
 1. Print the hash of "password123" — observe the PHC format string
@@ -218,12 +222,12 @@ pub struct Claims {
 **Security considerations:**
 - Current implementation uses HS256 (symmetric) — the same secret signs and verifies
 - Production should use Ed25519 (asymmetric) — private key signs, public key verifies
-- 1-hour expiry is generous for dev; production typically uses 15 minutes + refresh tokens
+- Access tokens use 15-minute expiry with refresh token rotation (30-day refresh tokens stored in `refresh_tokens` table)
 
 **Exercise:**
 1. Decode a JWT token manually (base64-decode the middle segment) to see the claims
 2. Try modifying one character of the token and observe that verification fails
-3. Implement a refresh token flow: opaque token stored in the database, 7-day expiry
+3. Study the refresh token flow in `routes.rs` (`refresh` and `logout` handlers)
 
 ---
 

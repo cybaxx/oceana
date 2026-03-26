@@ -21,4 +21,4 @@
 ## Security
 
 - **[Security Audit](security-audit.md)** — Initial vulnerability findings and remediation status
-- **[Audit Round 1](audit_round1.md)** — Detailed code review with 29 findings (5 fixed, 24 remaining)
+- **[Audit Round 1](audit_round1.md)** — Detailed code review with 29 findings, most remediated

@@ -1,4 +1,4 @@
-import { s as store_get, a as attr, e as escape_html, c as ensure_array_like, b as stringify, d as attr_class, u as unsubscribe_stores } from "../../chunks/index2.js";
+import { c as store_get, d as attr, f as escape_html, h as ensure_array_like, b as stringify, a as attr_class, u as unsubscribe_stores } from "../../chunks/index2.js";
 import { a as auth } from "../../chunks/auth.js";
 import { M as Markdown } from "../../chunks/Markdown.js";
 import "@privacyresearch/libsignal-protocol-typescript";
@@ -12,6 +12,8 @@ function _page($$renderer, $$props) {
     let loadingMore = false;
     let signatureStatus = {};
     let signing = false;
+    let editingPost = null;
+    let editContent = "";
     function extractImage(content) {
       const match = content.match(/\[img:\s*(\/api\/v1\/uploads\/[^\]]+)\]/);
       if (match) {
@@ -110,7 +112,15 @@ function _page($$renderer, $$props) {
           let post = each_array_1[$$index_4];
           const parsed = extractImage(post.content);
           const sigStatus = signatureStatus[post.id];
-          $$renderer2.push(`<div class="group rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-4 transition-all hover:border-[var(--ocean-400)]/40 hover:shadow-[0_0_12px_var(--terminal-glow)]"><div class="mb-2 flex items-center gap-2"><div class="flex h-7 w-7 items-center justify-center rounded border border-[var(--terminal-border)] bg-[var(--ocean-800)] text-xs font-bold text-[var(--ocean-300)]">${escape_html(post.author_username[0].toUpperCase())}</div> <a${attr("href", `/users/${stringify(post.author_id)}`)} class="text-xs font-semibold text-[var(--terminal-green)] no-underline hover:underline">@${escape_html(post.author_username)}</a> `);
+          $$renderer2.push(`<div class="post-card group rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-4 transition-all hover:border-[var(--ocean-400)]/40 hover:shadow-[0_0_12px_var(--terminal-glow)]"><div class="mb-2 flex items-center gap-2">`);
+          if (post.author_avatar_url) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<img${attr("src", post.author_avatar_url)} alt="" class="h-7 w-7 rounded border border-[var(--terminal-border)] object-cover"/>`);
+          } else {
+            $$renderer2.push("<!--[-1-->");
+            $$renderer2.push(`<div class="flex h-7 w-7 items-center justify-center rounded border border-[var(--terminal-border)] bg-[var(--ocean-800)] text-xs font-bold text-[var(--ocean-300)]">${escape_html(post.author_username[0].toUpperCase())}</div>`);
+          }
+          $$renderer2.push(`<!--]--> <a${attr("href", `/users/${stringify(post.author_id)}`)} class="text-xs font-semibold text-[var(--terminal-green)] no-underline hover:underline">@${escape_html(post.author_username)}</a> `);
           if (post.author_is_bot) {
             $$renderer2.push("<!--[0-->");
             $$renderer2.push(`<span class="rounded border border-[var(--ocean-400)]/40 bg-[var(--ocean-400)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--ocean-300)]">BOT</span>`);
@@ -125,9 +135,31 @@ function _page($$renderer, $$props) {
           } else {
             $$renderer2.push("<!--[-1-->");
           }
-          $$renderer2.push(`<!--]--> <span class="ml-auto text-xs text-[var(--terminal-dim)]">${escape_html(timeAgo(post.created_at))}</span></div> `);
-          if (parsed.text) {
+          $$renderer2.push(`<!--]--> <span class="ml-auto flex items-center gap-1.5 text-xs text-[var(--terminal-dim)]">`);
+          if (post.updated_at) {
             $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<span class="text-[10px] italic">(edited)</span>`);
+          } else {
+            $$renderer2.push("<!--[-1-->");
+          }
+          $$renderer2.push(`<!--]--> ${escape_html(timeAgo(post.created_at))} `);
+          if (post.author_id === store_get($$store_subs ??= {}, "$auth", auth).user?.id) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<button class="text-[var(--terminal-dim)] hover:text-[var(--ocean-300)] transition-colors" title="Edit post"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"></path></svg></button>`);
+          } else {
+            $$renderer2.push("<!--[-1-->");
+          }
+          $$renderer2.push(`<!--]--></span></div> `);
+          if (editingPost === post.id) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<div class="mt-2"><textarea rows="3" class="w-full resize-none rounded border border-[var(--ocean-400)] bg-[var(--ocean-950)] p-3 text-sm text-[var(--ocean-100)] focus:outline-none focus:shadow-[0_0_8px_var(--terminal-glow)]">`);
+            const $$body_1 = escape_html(editContent);
+            if ($$body_1) {
+              $$renderer2.push(`${$$body_1}`);
+            }
+            $$renderer2.push(`</textarea> <div class="mt-1 flex gap-2 justify-end"><button class="rounded border border-[var(--terminal-border)] px-3 py-1 text-xs text-[var(--terminal-dim)] hover:text-[var(--ocean-100)]">cancel</button> <button${attr("disabled", !editContent.trim(), true)} class="rounded border border-[var(--ocean-400)] px-3 py-1 text-xs text-[var(--ocean-300)] hover:bg-[var(--ocean-400)]/10 disabled:opacity-30">save</button></div></div>`);
+          } else if (parsed.text) {
+            $$renderer2.push("<!--[1-->");
             $$renderer2.push(`<div class="text-sm leading-relaxed text-[var(--ocean-100)]">`);
             Markdown($$renderer2, { content: parsed.text });
             $$renderer2.push(`<!----></div>`);

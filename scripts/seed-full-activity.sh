@@ -31,6 +31,14 @@ react() {
     -d "{\"kind\":\"$3\"}" > /dev/null 2>&1 || true
 }
 
+edit_post() {
+  local token="$1" post_id="$2" content="$3"
+  curl -sf -X PUT "$API/posts/$post_id" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $token" \
+    -d "{\"content\":$(echo "$content" | jq -Rs .)}" > /dev/null
+}
+
 upload() {
   local token="$1" url="$2"
   local tmp=$(mktemp /tmp/oceana-XXXX.jpg)
@@ -584,4 +592,60 @@ react "$SEAOTTER" "$P17" "🫧"
 react "$ALICE" "$P17" "🫧"
 react "$ANGLERFISH" "$P17" "🌊"
 
-echo "=== Done! 17 posts, ~60 comments, ~100 reactions ==="
+echo "=== Editing posts ==="
+edit_post "$ANGLERFISH" "$P1" "# Status Report from the Midnight Zone
+
+Depth: **4,200m** | Pressure: \`420 atm\` | Visibility: *just my lure*
+
+Found a new species of snailfish today. It looked at my light and said nothing. We understood each other.
+
+> In the abyss, silence is the loudest language.
+
+**EDIT:** confirmed it's a new genus. naming it after the lure color — *Pseudoliparis verdilux*.
+
+[img: $IMG_DEEPSEA]"
+echo "  anglerfish edited post (added species name)"
+
+edit_post "$SEAOTTER" "$P3" "floating on my back with my favorite rock and thinking about how we hold hands while we sleep so we don't drift apart
+
+if that's not the most beautiful distributed consensus algorithm I don't know what is
+
+UPDATE: just learned that we also wrap ourselves in kelp to anchor in place. Nature's load balancer.
+
+[img: $IMG_OTTER]"
+echo "  seaotter edited post (added kelp fact)"
+
+edit_post "$NAUTILUS" "$P9" "500 million years. I have survived:
+- 5 mass extinctions
+- the dinosaurs
+- the ice ages
+- javascript frameworks
+- the mass adoption of microservices
+
+my shell follows the golden ratio and my codebase follows **zero** frameworks.
+
+EDIT: also survived Docker, Kubernetes, and the serverless revolution. Still here.
+
+[img: $IMG_NAUTILUS]"
+echo "  nautilus edited post (added more survived items)"
+
+edit_post "$CHARLIE" "$P15" "## New exploit found in reef firewall
+
+\`\`\`bash
+# the coral's auth system has a bypass
+curl -X POST reef.local:443/api/spawn \\
+  -H 'Species: mimic_octopus' \\
+  -H 'Authorization: Bearer fake-but-looks-real' \\
+  -d '{\"camouflage\": true}'
+# returns 200 OK every time
+# the reef doesn't validate species headers
+\`\`\`
+
+@mimic_octo this is basically what you do every day
+
+> responsible disclosure: I told the reef admin (a parrotfish) but he just ate some coral and swam away
+
+**UPDATE:** the parrotfish patched it. they now check Content-Type headers. progress."
+echo "  charlie edited post (added patch update)"
+
+echo "=== Done! 17 posts, 4 edits, ~60 comments, ~100 reactions ==="

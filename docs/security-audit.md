@@ -11,9 +11,9 @@
 | Severity | Count | Fixed |
 |----------|-------|-------|
 | CRITICAL | 4 | 2 |
-| HIGH | 7 | 3 |
-| MEDIUM | 10 | 5 |
-| LOW | 6 | 0 |
+| HIGH | 7 | 4 |
+| MEDIUM | 10 | 7 |
+| LOW | 6 | 4 |
 | INFO | 5 | — |
 | **Total** | **32** | **10** |
 
@@ -97,13 +97,9 @@ return sanitized.replace(/<div data-embed="(\d+)"><\/div>/g, (_, idx) => {
 
 ---
 
-### H4. Email leaked via unauthenticated user endpoint
+### H4. ~~Email leaked via unauthenticated user endpoint~~ FIXED
 
-**File:** `backend/src/routes.rs:109-119`, `backend/src/models.rs:8-18`
-
-`GET /users/:id` requires no authentication and returns the full `User` struct including `email`. Password hash is skipped, but email is not.
-
-**Fix:** Add `#[serde(skip_serializing)]` to email, or create a public profile DTO.
+**Status:** Remediated. `#[serde(skip_serializing)]` is now applied to the `email` field in the `User` struct, preventing it from appearing in API responses.
 
 ---
 
@@ -183,13 +179,9 @@ Only the client-provided `Content-Type` header is checked. An attacker can uploa
 
 ---
 
-### M7. No email format validation
+### M7. ~~No email format validation~~ FIXED
 
-**File:** `backend/src/routes.rs:61-66`
-
-Arbitrary strings accepted as email addresses.
-
-**Fix:** Validate email format server-side.
+**Status:** Remediated. `validate_email()` now checks max length (254), local part length (1-64), domain structure, TLD length, and restricted character sets.
 
 ---
 
@@ -209,13 +201,9 @@ JWT stored in `localStorage` is accessible to any JS on the page. Combined with 
 
 ---
 
-### M10. Path traversal — backslash not blocked
+### M10. ~~Path traversal — backslash not blocked~~ FIXED
 
-**File:** `backend/src/routes.rs:717-723`
-
-Only `/` and `..` are blocked in upload filenames. On Windows, `\` is also a path separator.
-
-**Fix:** Whitelist pattern: allow only `[a-f0-9-]+\.(jpg|png|gif|webp)`.
+**Status:** Remediated. Upload filename validation now rejects `/`, `\`, and `..` characters.
 
 ---
 
@@ -229,23 +217,21 @@ If the secret leaks, anyone can forge tokens. Asymmetric algorithms (ES256) are 
 
 ---
 
-### L2. No refresh token mechanism
+### L2. ~~No refresh token mechanism~~ FIXED
 
-1-hour expiry with no refresh flow. Users must re-login frequently.
-
----
-
-### L3. Weak password policy
-
-Only minimum 8 characters enforced. No complexity requirements.
+**Status:** Remediated. 15-minute access tokens with 30-day refresh tokens. Token rotation on each refresh. Server-side revocation on logout.
 
 ---
 
-### L4. Argon2 default (low) parameters
+### L3. ~~Weak password policy~~ PARTIALLY FIXED
 
-**File:** `backend/src/auth.rs:79-81`
+**Status:** Password length now enforced at 8-128 characters. Username restricted to `[a-zA-Z0-9_-]`. Email properly validated. Complexity requirements (character diversity) not yet enforced.
 
-Intentionally weak for dev speed. Must be tuned for production.
+---
+
+### L4. ~~Argon2 default (low) parameters~~ FIXED
+
+**Status:** Remediated. Argon2 parameters configurable via `ARGON2_M_COST`, `ARGON2_T_COST`, `ARGON2_P_COST` env vars, defaulting to OWASP-recommended values (m=47104, t=1, p=1).
 
 ---
 
@@ -288,7 +274,7 @@ Mitigated by Bearer token auth (not cookies), but becomes exploitable if session
 
 ## Recommended Priority (Updated)
 
-**Fixed:** C3, C4, H3, H5 (partial), M1, M2, M3, M6, M8
+**Fixed:** C3, C4, H3, H4, H5 (partial), L2, L3 (partial), L4, M1, M2, M3, M6, M7, M8, M10
 
 **Remaining priorities:**
 1. **Immediate:** Fix C1, C2 (XSS chain still enables account takeover)

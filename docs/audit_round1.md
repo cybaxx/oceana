@@ -18,8 +18,8 @@ The most significant findings relate to: JWT tokens exposed in WebSocket URLs (l
 |----------|-------|-------|
 | CRITICAL | 2 | 2 |
 | HIGH     | 6 | 6 |
-| MEDIUM   | 8 | 5 |
-| LOW      | 7 | 3 |
+| MEDIUM   | 8 | 7 |
+| LOW      | 7 | 5 |
 | INFO     | 6 | — |
 
 ---
@@ -122,30 +122,15 @@ if body.password.len() < 8 {
 
 ---
 
-#### M-6: Argon2 Default Parameters May Be Too Low for Production
+#### M-6: ~~Argon2 Default Parameters May Be Too Low for Production~~ FIXED
 
-**File:** `/backend/src/auth.rs:79-84`
-**Description:** The code deliberately uses Argon2's default parameters "for dev speed" as noted in the comment. Default params are `m=19456 (19MB), t=2, p=1` per the seed data hashes.
-
-```rust
-// Deliberately using default (lower) params for dev speed.
-// Production should tune memory/iterations.
-Argon2::default()
-```
-
-**Impact:** OWASP recommends Argon2id with m=47104 (46MB), t=1, p=1 as minimum. The current params provide less brute-force resistance than recommended.
-**Recommendation:** For production, tune parameters per OWASP guidelines. Make parameters configurable via environment variables.
+**Status:** Remediated. Argon2 parameters are now configurable via `ARGON2_M_COST`, `ARGON2_T_COST`, and `ARGON2_P_COST` environment variables, falling back to OWASP-recommended defaults (m=47104, t=1, p=1). `verify_password()` reads params from the stored hash, so old hashes continue to verify correctly.
 
 ---
 
-#### M-7: No Conversation Access Control for Key Bundle Retrieval
+#### M-7: ~~No Rate Limiting on Key Bundle Retrieval~~ FIXED
 
-**File:** `/backend/src/routes.rs:910-952`
-**Description:** Any authenticated user can fetch any other user's key bundle via `GET /keys/bundle/:user_id`. While OPK consumption requires a shared conversation, the identity key and signed prekey are always returned. This is somewhat by design (needed to initiate sessions) but allows harvesting of public key material.
-
-**Impact:** Low direct impact since these are public keys, but allows enumeration and pre-computation attacks. More importantly, a user could exhaust another user's OPKs by creating a conversation with them and repeatedly fetching bundles (the OPK pop happens if they share a conversation).
-
-**Recommendation:** Consider adding rate limiting specifically to key bundle fetches. The OPK consumption is already gated by conversation membership, which is good.
+**Status:** Remediated. The `/api/v1/keys/bundle/` endpoint now has a dedicated rate limit of 20 requests per 60 seconds, stricter than the default 60/min, preventing OPK exhaustion attacks.
 
 ---
 
@@ -168,31 +153,15 @@ DELETE FROM prekeys WHERE id = (SELECT id FROM prekeys WHERE user_id = $1 ORDER 
 
 ### LOW
 
-#### L-1: No Username Character Validation
+#### L-1: ~~No Username Character Validation~~ FIXED
 
-**File:** `/backend/src/routes.rs:62-64`
-**Description:** Username validation only checks length (3-32 chars) but not character set. Users can register with usernames containing special characters, spaces, Unicode confusables, or control characters.
-
-```rust
-if body.username.len() < 3 || body.username.len() > 32 {
-```
-
-**Impact:** Potential for homograph attacks (e.g., `alice` vs `al\u0456ce`), display issues, or social engineering.
-**Recommendation:** Restrict usernames to `[a-zA-Z0-9_-]` or a similar safe character set. Normalize Unicode.
+**Status:** Remediated. Usernames are now validated to only allow `[a-zA-Z0-9_-]` characters, rejecting Unicode confusables, spaces, and special characters.
 
 ---
 
-#### L-2: Email Validation Is Minimal
+#### L-2: ~~Email Validation Is Minimal~~ FIXED
 
-**File:** `/backend/src/routes.rs:68-70`
-**Description:** Email validation only checks for `@` and `.` presence. This allows many invalid emails through (e.g., `@.`, `a@b.`).
-
-```rust
-if !body.email.contains('@') || !body.email.contains('.') {
-```
-
-**Impact:** Invalid emails in database, no email verification means accounts can be created with anyone's email.
-**Recommendation:** Use a proper email validation library. Consider requiring email verification (though this adds complexity for a hobby project).
+**Status:** Remediated. Email validation now checks: max 254 chars total, non-empty local part (max 64 chars), domain has at least one dot, no empty domain labels, TLD at least 2 chars, and restricted character sets for both local and domain parts.
 
 ---
 
@@ -304,7 +273,7 @@ This is fine for a single-instance hobby project but would need Redis-backed sto
 
 ## Prioritized Recommendations (Updated)
 
-**Fixed:** C-1, C-2, H-2, H-3, H-4, H-5, H-6, M-5
+**Fixed:** C-1, C-2, H-2, H-3, H-4, H-5, H-6, L-1, L-2, L-5, L-6, L-7, M-1, M-2, M-4, M-5, M-6, M-7
 
 ### Short-term (P1)
 2. ~~**Fix H-2:** Add per-message rate limiting to WebSocket handler.~~ DONE

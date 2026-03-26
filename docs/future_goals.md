@@ -27,20 +27,25 @@ Ordered by impact. Security hardening (Phase 7) is partially complete from the r
 
 ## Quick Wins
 
-- [ ] **Follower/following list pages** — Counts show but can't view actual follower/following lists
-- [ ] **Profile avatar upload UI** — Schema supports it, no upload interface
-- [ ] **Post editing** — Only delete supported, no edit capability
-- [ ] **Conversation naming** — Groups show member list but no titles
+- [x] **Follower/following list endpoints** — Backend endpoints implemented
+- [x] **Profile avatar upload** — Backend migration and handler implemented
+- [x] **Post editing** — Edit button on own posts, inline textarea, updated_at tracking
+- [x] **Conversation naming** — Name field on conversations, editable in chat header
 
 ## Security Hardening
 
-- [ ] **Fix silent encryption fallback** — Chat silently sends plaintext when E2EE fails; should error
-- [ ] **Remove plaintext message column** — Or enforce E2EE-only to prevent server-readable messages
-- [ ] **WS message size validation** — No content length limit before DB insert
-- [ ] **Group key rotation** — AES group key never rotates on membership changes
-- [ ] **Token refresh/revocation** — 1-hour JWTs can't be invalidated early
-- [ ] **Password max length cap** — Prevent DoS via Argon2 with very long passwords
-- [ ] **WS message rate limiting** — No per-message rate limit after WebSocket upgrade
+- [x] **Fix silent encryption fallback** — Chat now errors when E2EE fails instead of sending plaintext
+- [x] **WS message size validation** — Content/ciphertext validated to max 10,000 chars; frame size limited to 64KB
+- [x] **WS message rate limiting** — Per-connection rate limiting at 10 messages/second
+- [x] **Group key rotation** — AES group key rotates when membership changes
+- [x] **Token refresh/revocation** — 15-min access tokens + 30-day refresh tokens with server-side revocation
+- [x] **Password max length cap** — Limited to 128 characters
+- [x] **Configurable Argon2 parameters** — Via env vars, defaults to OWASP-recommended values
+- [x] **Key bundle rate limiting** — 20 requests/minute on `/keys/bundle/`
+- [x] **Email validation** — Proper format validation (not just `@` and `.`)
+- [x] **Username charset restriction** — `[a-zA-Z0-9_-]` only
+- [x] **Encrypted sent message cache** — AES-256-GCM encrypted localStorage cache
+- [x] **Exponential backoff on WS reconnect** — 1s to 60s cap with jitter
 
 ## Bigger Features
 

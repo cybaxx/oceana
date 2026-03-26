@@ -102,6 +102,15 @@ delete_post() {
     -H "Authorization: Bearer $1" > /dev/null
 }
 
+edit_post() {
+  local token="$1" post_id="$2" name="$3" content="$4"
+  local sig
+  sig=$(sign_content "$name" "$content")
+  curl -sf "$API/posts/$post_id" -X PUT -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $token" \
+    -d "{\"content\":$(echo "$content" | jq -Rs .),\"signature\":\"$sig\"}" > /dev/null
+}
+
 upload_local_image() {
   local token="$1" filepath="$2"
   curl -sf "$API/upload" \
@@ -570,7 +579,30 @@ delete_post "$BOB" "${ALL_POSTS[10]}"
 echo "  deleted bob post 10 (unpopular opinion)"
 sleep 0.3
 
-# ── 14. Feed verification ──────────────────────────────────────────────────
+# ── 14. Post editing ──────────────────────────────────────────────────────
+
+echo ""
+echo "Testing post editing..."
+edit_post "$ALICE" "${ALL_POSTS[0]}" alice "the thermocline at 400m is wild today — temperature dropped 14°C in 20 meters (EDIT: correction, it was 14°C — rechecked the CTD data)"
+echo "  alice edited post 0 (thermocline — added correction)"
+
+edit_post "$CHARLIE" "${ALL_POSTS[12]}" charlie "wrote a distributed consensus algorithm inspired by schooling fish. O(n log n) and zero leader election. UPDATE: published the preprint! link in bio"
+echo "  charlie edited post 12 (algo — added publication update)"
+
+edit_post "$CUTTLEFISH" "${ALL_POSTS[34]}" cuttlefish "tested a new camouflage pattern today. went checkerboard on a sandy bottom just to flex. the crabs were confused. the shrimp were impressed. EDIT: the hermit crabs have now started imitating the pattern 🐙"
+echo "  cuttlefish edited post 34 (camo — added follow-up)"
+
+# Verify edit shows updated_at
+EDITED_POST=$(curl -sf "$API/posts/${ALL_POSTS[0]}" -H "Authorization: Bearer $ALICE")
+HAS_UPDATED=$(echo "$EDITED_POST" | jq 'has("updated_at") and .updated_at != null')
+if [ "$HAS_UPDATED" = "true" ]; then
+  echo "  verified: edited post has updated_at timestamp"
+else
+  echo "  warning: edited post missing updated_at"
+fi
+sleep 0.3
+
+# ── 15. Feed verification ──────────────────────────────────────────────────
 
 echo ""
 echo "Verifying feeds..."
@@ -603,4 +635,5 @@ echo "   25 signed replies (9 threads, up to 4 levels deep)"
 echo "   $TOTAL_REACTIONS reactions (26 likes, 6 yikes, 18 emoji)"
 echo "   2 reaction removals, 1 re-reaction"
 echo "   2 post deletions"
+echo "   3 post edits (with updated_at verification)"
 echo "   feed verification with pagination"

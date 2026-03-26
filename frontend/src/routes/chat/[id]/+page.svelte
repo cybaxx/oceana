@@ -21,6 +21,9 @@
 	let verifyUsername = $state('');
 	let memberUsernames = $state<Record<string, string>>({});
 	let sendError = $state('');
+	let convName = $state<string | null>(null);
+	let editingName = $state(false);
+	let editNameValue = $state('');
 
 	const conversationId = $derived($page.params.id!);
 
@@ -52,6 +55,13 @@
 
 		connectWs();
 		initChatListeners();
+
+		// Fetch conversation details for name
+		try {
+			const convs = (await api.listConversations()) as import('$lib/types').Conversation[];
+			const conv = convs.find((c) => c.id === conversationId);
+			if (conv?.name) convName = conv.name;
+		} catch { /* ignore */ }
 
 		// Fetch conversation members for encryption targets
 		try {
@@ -141,6 +151,21 @@
 	function dismissKeyAlert(userId: string) {
 		keyChangeAlerts.update((s) => { s.delete(userId); return new Set(s); });
 	}
+
+	function startEditName() {
+		editingName = true;
+		editNameValue = convName || '';
+	}
+
+	async function saveConvName() {
+		try {
+			const updated = await api.updateConversation(conversationId, editNameValue.trim() || null) as import('$lib/types').Conversation;
+			convName = updated.name || null;
+			editingName = false;
+		} catch (e: any) {
+			sendError = e.message;
+		}
+	}
 </script>
 
 <div class="flex h-[calc(100vh-80px)] flex-col">
@@ -148,9 +173,25 @@
 	<div class="flex items-center justify-between border-b border-[var(--terminal-border)] pb-3">
 		<div class="flex items-center gap-3">
 			<a href="/chat" class="text-[var(--terminal-dim)] no-underline hover:text-[var(--ocean-300)]">&larr;</a>
-			<h1 class="text-sm font-bold text-[var(--ocean-300)]">
-				<span class="text-[var(--terminal-dim)]">chat/</span>{conversationId.slice(0, 8)}
-			</h1>
+			{#if editingName}
+				<form onsubmit={(e) => { e.preventDefault(); saveConvName(); }} class="flex items-center gap-2">
+					<input
+						bind:value={editNameValue}
+						placeholder="chat name..."
+						class="rounded border border-[var(--ocean-400)] bg-[var(--ocean-950)] px-2 py-1 text-sm text-[var(--ocean-100)] focus:outline-none"
+						autofocus
+					/>
+					<button type="submit" class="text-xs text-[var(--ocean-300)] hover:underline">save</button>
+					<button type="button" onclick={() => (editingName = false)} class="text-xs text-[var(--terminal-dim)] hover:underline">cancel</button>
+				</form>
+			{:else}
+				<h1 class="text-sm font-bold text-[var(--ocean-300)]">
+					<span class="text-[var(--terminal-dim)]">chat/</span>{convName || conversationId.slice(0, 8)}
+				</h1>
+				<button onclick={startEditName} class="text-[var(--terminal-dim)] hover:text-[var(--ocean-300)] transition-colors" title="Edit name">
+					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"/></svg>
+				</button>
+			{/if}
 		</div>
 		<div class="flex items-center gap-2">
 			{#if cryptoReady}

@@ -16,6 +16,7 @@ export interface Post {
 	parent_id: string | null;
 	signature?: string | null;
 	created_at: string;
+	updated_at?: string | null;
 }
 
 export interface PostWithAuthor extends Post {
@@ -39,6 +40,7 @@ export interface AuthResponse {
 export interface Conversation {
 	id: string;
 	created_at: string;
+	name?: string | null;
 	last_message_text: string | null;
 	last_message_at: string | null;
 	last_message_sender_id: string | null;

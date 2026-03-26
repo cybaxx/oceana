@@ -27,7 +27,7 @@ WebSocket connections use a two-step ticket-based auth flow to avoid exposing JW
 
 ### Reconnection
 
-The frontend client (`src/lib/ws.ts`) automatically reconnects after 3 seconds on disconnection, as long as a valid auth token exists. Each reconnection gets a fresh ticket.
+The frontend client (`src/lib/ws.ts`) automatically reconnects with exponential backoff (1s, 2s, 4s... up to 60s cap) with random jitter on disconnection, as long as a valid auth token exists. Each reconnection gets a fresh ticket. The attempt counter resets on successful connection.
 
 ---
 
@@ -177,6 +177,12 @@ The `ConnectionManager` (`backend/src/chat.rs`) maintains an in-memory map of `u
 - **disconnect:** Removes the sender, cleans up empty entries
 - **send_to_user:** Broadcasts a message to all active connections for a user
 
+### Rate Limiting
+
+- **Per-connection:** 10 messages per second (sliding window)
+- **Frame size:** Max 64KB per WebSocket frame
+- **Content validation:** Max 10,000 characters for content/ciphertext before DB insertion
+
 ### Message Flow
 
 ```
@@ -185,10 +191,12 @@ Client A sends message
     ▼
 WebSocket Handler (routes.rs)
     │
+    ├── 0. Check per-connection rate limit (10 msg/sec)
     ├── 1. Verify sender is conversation member
-    ├── 2. Store message in PostgreSQL
-    ├── 3. Fetch all conversation member IDs
-    └── 4. Broadcast via ConnectionManager to all members
+    ├── 2. Validate content/ciphertext length (≤10,000 chars)
+    ├── 3. Store message in PostgreSQL (plaintext always NULL server-side)
+    ├── 4. Fetch all conversation member IDs
+    └── 5. Broadcast via ConnectionManager to all members
             │
             ├── Client A (receives own message)
             ├── Client B (receives message)

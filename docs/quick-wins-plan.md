@@ -2,7 +2,7 @@
 
 Four small features ready to build. All follow existing patterns closely.
 
-**Status:** Planned, not yet implemented.
+**Status:** All four features are implemented.
 
 ---
 

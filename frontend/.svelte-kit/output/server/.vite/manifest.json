@@ -105,6 +105,17 @@
       "_root.js"
     ]
   },
+  "_stores.js": {
+    "file": "chunks/stores.js",
+    "name": "stores",
+    "imports": [
+      "_index2.js",
+      "_exports.js",
+      "_utils.js",
+      "_root.js",
+      "_state.svelte.js"
+    ]
+  },
   "_utils.js": {
     "file": "chunks/utils.js",
     "name": "utils"
@@ -167,10 +178,12 @@
     "isEntry": true,
     "imports": [
       "_index2.js",
-      "_auth.js"
+      "_stores.js",
+      "_auth.js",
+      "_index.js"
     ],
     "css": [
-      "_app/immutable/assets/_layout.Dh5R9Try.css"
+      "_app/immutable/assets/_layout.Bmv51ZMT.css"
     ]
   },
   "src/routes/+page.svelte": {
@@ -215,10 +228,7 @@
     "isEntry": true,
     "imports": [
       "_index2.js",
-      "_exports.js",
-      "_utils.js",
-      "_root.js",
-      "_state.svelte.js",
+      "_stores.js",
       "_auth.js",
       "_chat.js",
       "_Markdown.js"

@@ -8,6 +8,7 @@
 	import type { Conversation } from '$lib/types';
 
 	let newUserId = $state('');
+	let newChatName = $state('');
 	let creating = $state(false);
 	let cryptoReady = $state(false);
 
@@ -28,7 +29,7 @@
 		if (!newUserId.trim()) return;
 		creating = true;
 		try {
-			const conv = (await api.createConversation([newUserId.trim()])) as Conversation;
+			const conv = (await api.createConversation([newUserId.trim()], newChatName.trim() || undefined)) as Conversation;
 			await loadConversations();
 			window.location.href = `/chat/${conv.id}`;
 		} catch (e: any) {
@@ -64,19 +65,26 @@
 
 	<!-- New conversation -->
 	<form onsubmit={(e) => { e.preventDefault(); createChat(); }}
-		class="flex gap-2">
+		class="space-y-2">
+		<div class="flex gap-2">
+			<input
+				bind:value={newUserId}
+				placeholder="user ID to chat with..."
+				class="flex-1 rounded border border-[var(--terminal-border)] bg-[var(--ocean-900)] px-3 py-2 text-sm text-[var(--terminal-text)] placeholder:text-[var(--terminal-dim)] focus:border-[var(--ocean-400)] focus:outline-none"
+			/>
+			<button
+				type="submit"
+				disabled={creating}
+				class="rounded border border-[var(--ocean-400)] px-4 py-2 text-sm text-[var(--ocean-300)] transition-all hover:bg-[var(--ocean-400)]/10 disabled:opacity-50"
+			>
+				new chat
+			</button>
+		</div>
 		<input
-			bind:value={newUserId}
-			placeholder="user ID to chat with..."
-			class="flex-1 rounded border border-[var(--terminal-border)] bg-[var(--ocean-900)] px-3 py-2 text-sm text-[var(--terminal-text)] placeholder:text-[var(--terminal-dim)] focus:border-[var(--ocean-400)] focus:outline-none"
+			bind:value={newChatName}
+			placeholder="chat name (optional)"
+			class="w-full rounded border border-[var(--terminal-border)] bg-[var(--ocean-900)] px-3 py-2 text-sm text-[var(--terminal-text)] placeholder:text-[var(--terminal-dim)] focus:border-[var(--ocean-400)] focus:outline-none"
 		/>
-		<button
-			type="submit"
-			disabled={creating}
-			class="rounded border border-[var(--ocean-400)] px-4 py-2 text-sm text-[var(--ocean-300)] transition-all hover:bg-[var(--ocean-400)]/10 disabled:opacity-50"
-		>
-			new chat
-		</button>
 	</form>
 
 	<!-- Conversation list -->
@@ -89,7 +97,7 @@
 				<div class="flex items-center justify-between">
 					<div class="flex items-center gap-2">
 						<span class="font-mono text-xs text-[var(--terminal-dim)]">
-							{conv.id.slice(0, 8)}...
+							{conv.name || conv.id.slice(0, 8) + '...'}
 						</span>
 						{#if cryptoReady}
 							<svg class="h-3 w-3 text-[var(--terminal-green)]/40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>

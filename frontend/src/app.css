@@ -83,3 +83,9 @@ input, textarea {
 input::placeholder, textarea::placeholder {
 	color: var(--terminal-dim);
 }
+
+/* Bloom mode transparency */
+.bloom-active .post-card,
+.bloom-active .login-card {
+	background-color: rgba(10, 16, 24, 0.75) !important;
+}

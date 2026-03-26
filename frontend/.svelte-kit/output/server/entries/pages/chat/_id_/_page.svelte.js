@@ -1,36 +1,9 @@
-import { g as getContext, e as escape_html, s as store_get, c as ensure_array_like, d as attr_class, a as attr, b as stringify, u as unsubscribe_stores, f as derived } from "../../../../chunks/index2.js";
-import "clsx";
-import "@sveltejs/kit/internal";
-import "../../../../chunks/exports.js";
-import "../../../../chunks/utils.js";
-import "@sveltejs/kit/internal/server";
-import "../../../../chunks/root.js";
-import "../../../../chunks/state.svelte.js";
+import { f as escape_html, c as store_get, h as ensure_array_like, a as attr_class, d as attr, b as stringify, u as unsubscribe_stores, e as derived } from "../../../../chunks/index2.js";
+import { p as page } from "../../../../chunks/stores.js";
 import { a as auth } from "../../../../chunks/auth.js";
 import { v as verificationReceived, k as keyChangeAlerts, a as activeMessages, t as typingUsers } from "../../../../chunks/chat.js";
 import "@privacyresearch/libsignal-protocol-typescript";
 import { M as Markdown } from "../../../../chunks/Markdown.js";
-const getStores = () => {
-  const stores$1 = getContext("__svelte__");
-  return {
-    /** @type {typeof page} */
-    page: {
-      subscribe: stores$1.page.subscribe
-    },
-    /** @type {typeof navigating} */
-    navigating: {
-      subscribe: stores$1.navigating.subscribe
-    },
-    /** @type {typeof updated} */
-    updated: stores$1.updated
-  };
-};
-const page = {
-  subscribe(fn) {
-    const store = getStores().page;
-    return store.subscribe(fn);
-  }
-};
 function _page($$renderer, $$props) {
   $$renderer.component(($$renderer2) => {
     var $$store_subs;
@@ -47,7 +20,12 @@ function _page($$renderer, $$props) {
     function isEncrypted(msg) {
       return !!msg.ciphertext || !!msg.message_type;
     }
-    $$renderer2.push(`<div class="flex h-[calc(100vh-80px)] flex-col"><div class="flex items-center justify-between border-b border-[var(--terminal-border)] pb-3"><div class="flex items-center gap-3"><a href="/chat" class="text-[var(--terminal-dim)] no-underline hover:text-[var(--ocean-300)]">←</a> <h1 class="text-sm font-bold text-[var(--ocean-300)]"><span class="text-[var(--terminal-dim)]">chat/</span>${escape_html(conversationId().slice(0, 8))}</h1></div> <div class="flex items-center gap-2">`);
+    $$renderer2.push(`<div class="flex h-[calc(100vh-80px)] flex-col"><div class="flex items-center justify-between border-b border-[var(--terminal-border)] pb-3"><div class="flex items-center gap-3"><a href="/chat" class="text-[var(--terminal-dim)] no-underline hover:text-[var(--ocean-300)]">←</a> `);
+    {
+      $$renderer2.push("<!--[-1-->");
+      $$renderer2.push(`<h1 class="text-sm font-bold text-[var(--ocean-300)]"><span class="text-[var(--terminal-dim)]">chat/</span>${escape_html(conversationId().slice(0, 8))}</h1> <button class="text-[var(--terminal-dim)] hover:text-[var(--ocean-300)] transition-colors" title="Edit name"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"></path></svg></button>`);
+    }
+    $$renderer2.push(`<!--]--></div> <div class="flex items-center gap-2">`);
     {
       $$renderer2.push("<!--[-1-->");
       $$renderer2.push(`<div class="flex items-center gap-1.5 rounded-full border border-[var(--terminal-red)]/30 bg-[var(--terminal-red)]/5 px-2.5 py-1 text-[10px] text-[var(--terminal-red)]"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13.5 10.5V6.75a4.5 4.5 0 1 1 9 0v3.75M3.75 21.75h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H3.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"></path></svg> plaintext (no encryption)</div>`);

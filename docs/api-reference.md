@@ -32,9 +32,9 @@ Create a new user account.
 ```
 
 **Validation:**
-- Username: 3–32 characters
-- Password: 8+ characters
-- Email: must contain `@` and `.`
+- Username: 3–32 characters, `[a-zA-Z0-9_-]` only
+- Password: 8–128 characters
+- Email: validated format (local@domain.tld, proper structure)
 
 **Response (200):**
 ```json
@@ -47,7 +47,8 @@ Create a new user account.
     "is_bot": false,
     "created_at": "2026-03-18T00:00:00Z"
   },
-  "token": "eyJ..."
+  "token": "eyJ...",
+  "refresh_token": "uuid-string"
 }
 ```
 
@@ -71,10 +72,45 @@ Authenticate with email and password.
 }
 ```
 
-**Response (200):** Same as register.
+**Response (200):** Same as register (includes `token` and `refresh_token`).
 
 **Errors:**
 - `401` — Invalid credentials
+
+---
+
+### `POST /auth/refresh`
+
+Exchange a refresh token for a new access token + refresh token pair. Old refresh token is consumed.
+
+**Body:**
+```json
+{
+  "refresh_token": "uuid-string"
+}
+```
+
+**Response (200):**
+```json
+{
+  "token": "eyJ...",
+  "refresh_token": "new-uuid-string"
+}
+```
+
+**Errors:**
+- `401` — Invalid or expired refresh token
+
+---
+
+### `POST /auth/logout` (auth required)
+
+Revoke all refresh tokens for the authenticated user.
+
+**Response (200):**
+```json
+{ "status": "logged_out" }
+```
 
 ---
 
@@ -91,6 +127,7 @@ Fetch a user's public profile. No authentication required.
   "username": "alice",
   "display_name": "Alice",
   "bio": "hello world",
+  "avatar_url": "/api/v1/uploads/abc.png",
   "is_bot": false,
   "created_at": "2026-03-18T00:00:00Z",
   "follower_count": 42,
@@ -126,6 +163,27 @@ Search users by username or display name (ILIKE matching). Returns up to 20 resu
 
 ---
 
+### `GET /users/:id/followers`
+
+Fetch a user's followers. No authentication required.
+
+**Response (200):**
+```json
+[
+  { "id": "uuid", "username": "bob", "display_name": "Bob", "is_bot": false }
+]
+```
+
+---
+
+### `GET /users/:id/following`
+
+Fetch users that a user is following. No authentication required.
+
+**Response (200):** Same format as followers.
+
+---
+
 ### `PUT /profile` (auth required)
 
 Update the authenticated user's profile.
@@ -134,11 +192,12 @@ Update the authenticated user's profile.
 ```json
 {
   "display_name": "New Name",
-  "bio": "Updated bio"
+  "bio": "Updated bio",
+  "avatar_url": "/api/v1/uploads/avatar.png"
 }
 ```
 
-Both fields are optional. Only provided fields are updated.
+All fields are optional. Only provided fields are updated.
 
 **Validation:**
 - `display_name`: max 64 characters
@@ -639,6 +698,7 @@ When `next_cursor` is `null`, there are no more items.
 | Endpoint Pattern | Limit |
 |-----------------|-------|
 | `/auth/*` | 5 requests/minute |
+| `/keys/bundle/*` | 20 requests/minute |
 | `/upload` | 10 requests/minute |
 | All other endpoints | 60 requests/minute |
 

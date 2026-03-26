@@ -27,10 +27,22 @@ upload_image() {
 }
 
 create_conv() {
-  local token="$1" participants="$2"
+  local token="$1" participants="$2" name="${3:-}"
+  local body="{\"participant_ids\":$participants"
+  if [ -n "$name" ]; then
+    body="$body,\"name\":$(echo "$name" | jq -Rs .)"
+  fi
+  body="$body}"
   curl -sf "$API/chats" -H 'Content-Type: application/json' \
     -H "Authorization: Bearer $token" \
-    -d "{\"participant_ids\":$participants}" | jq -r '.id'
+    -d "$body" | jq -r '.id'
+}
+
+rename_conv() {
+  local token="$1" conv_id="$2" name="$3"
+  curl -sf "$API/chats/$conv_id" -X PUT -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $token" \
+    -d "{\"name\":$(echo "$name" | jq -Rs .)}" > /dev/null
 }
 
 send_msg() {
@@ -73,7 +85,7 @@ echo "  nautilus: $IMG_NAUTILUS"
 # ============================================================
 echo ""
 echo "Creating Conv 1: Alice <-> Bob — Deep Sea & Jellyfish"
-CONV1=$(create_conv "$ALICE" "[\"$BOB_ID\"]")
+CONV1=$(create_conv "$ALICE" "[\"$BOB_ID\"]" "Deep Sea & Jellyfish")
 echo "  conv_id: $CONV1"
 
 send_msg "$ALICE" "$CONV1" "hey bob! did you see that new paper on deep-sea jellyfish bioluminescence? absolutely wild stuff 🪼"
@@ -117,7 +129,7 @@ echo "  [bob] msg 8"
 # ============================================================
 echo ""
 echo "Creating Conv 2: Alice <-> Charlie — Crypto & Hacking"
-CONV2=$(create_conv "$ALICE" "[\"$CHARLIE_ID\"]")
+CONV2=$(create_conv "$ALICE" "[\"$CHARLIE_ID\"]" "Crypto & Hacking")
 echo "  conv_id: $CONV2"
 
 send_msg "$ALICE" "$CONV2" 'yo charlie, been reading about the Signal protocol internals. the double ratchet is such elegant engineering'
@@ -191,7 +203,7 @@ echo "  [charlie] msg 8"
 # ============================================================
 echo ""
 echo "Creating Conv 3: Bob <-> Charlie — Music, Festivals & Alt Culture"
-CONV3=$(create_conv "$BOB" "[\"$CHARLIE_ID\"]")
+CONV3=$(create_conv "$BOB" "[\"$CHARLIE_ID\"]" "Music & Festivals")
 echo "  conv_id: $CONV3"
 
 send_msg "$BOB" "$CONV3" "charlie have you heard the new Aphex Twin stuff?? apparently he dropped unreleased tracks on SoundCloud again under a random alias 🎵"
@@ -239,7 +251,7 @@ echo "  [charlie] msg 8"
 # ============================================================
 echo ""
 echo "Creating Conv 4: Group — Ocean Tech Collective"
-CONV4=$(create_conv "$ALICE" "[\"$BOB_ID\",\"$CHARLIE_ID\"]")
+CONV4=$(create_conv "$ALICE" "[\"$BOB_ID\",\"$CHARLIE_ID\"]" "Ocean Tech Collective")
 echo "  conv_id: $CONV4"
 
 send_msg "$ALICE" "$CONV4" "ok team, I've been thinking about our ocean monitoring project. what if we use **bio-inspired algorithms** for the sensor network?
@@ -371,9 +383,29 @@ send_msg "$ALICE" "$CONV4" "this is coming together beautifully. let's set up a 
 the ocean has been running distributed systems for 3.5 billion years — time we learned from the best 🌊🧬"
 echo "  [alice] msg 10"
 
+# ============================================================
+# Conversation renaming
+# ============================================================
 echo ""
-echo "✅ Bot conversations complete!"
-echo "   4 conversations created"
+echo "Testing conversation renaming..."
+rename_conv "$ALICE" "$CONV1" "Bioluminescence Research"
+echo "  renamed conv 1: 'Deep Sea & Jellyfish' -> 'Bioluminescence Research'"
+rename_conv "$BOB" "$CONV3" "Underground Sound & Culture"
+echo "  renamed conv 3: 'Music & Festivals' -> 'Underground Sound & Culture'"
+
+# Verify name appears in conversation list
+CONV_LIST=$(curl -sf "$API/chats" -H "Authorization: Bearer $ALICE")
+CONV1_NAME=$(echo "$CONV_LIST" | jq -r --arg id "$CONV1" '.[] | select(.id == $id) | .name // empty')
+if [ "$CONV1_NAME" = "Bioluminescence Research" ]; then
+  echo "  verified: conv 1 name updated in listing"
+else
+  echo "  warning: conv 1 name not found in listing (got: $CONV1_NAME)"
+fi
+
+echo ""
+echo "Bot conversations complete!"
+echo "   4 named conversations created"
 echo "   34 messages sent"
 echo "   3 images uploaded"
+echo "   2 conversation renames"
 echo "   Topics: ocean biology, cryptography, music culture, ocean tech"

@@ -55,6 +55,8 @@ import { api } from '$lib/api';
 // Auth
 await api.register(username, email, password);
 await api.login(email, password);
+await api.refresh(refreshToken);
+await api.logout();
 
 // Users
 await api.getUser(id);
@@ -62,6 +64,8 @@ await api.updateProfile({ display_name, bio });
 await api.follow(id);
 await api.unfollow(id);
 await api.searchUsers(query);
+await api.getFollowers(id);
+await api.getFollowing(id);
 
 // Posts
 await api.createPost(content, parent_id?, signature?);
@@ -142,7 +146,7 @@ The frontend proxies `/api/v1/*` requests to the backend:
 
 1. Client calls `POST /api/v1/ws/ticket` to get a one-time ticket (30s expiry)
 2. Client connects to `GET /api/v1/ws?ticket=<ticket>`
-3. Auto-reconnects on disconnection (3-second delay) while a valid token exists
+3. Auto-reconnects with exponential backoff (1s, 2s, 4s... up to 60s cap) with jitter while a valid token exists
 
 ---
 
@@ -159,7 +163,7 @@ Dark ocean terminal aesthetic:
 
 ## Testing
 
-86 unit tests across 7 test files:
+99 unit tests across 9 test files:
 
 | Test file | Coverage |
 |-----------|----------|

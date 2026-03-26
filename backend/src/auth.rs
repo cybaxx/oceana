@@ -119,11 +119,27 @@ pub async fn revoke_user_refresh_tokens(db: &sqlx::PgPool, user_id: Uuid) -> Res
 }
 
 pub fn hash_password(password: &str) -> Result<String, AppError> {
-    use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
+    use argon2::{password_hash::SaltString, Algorithm, Argon2, Params, PasswordHasher, Version};
     let salt = SaltString::generate(&mut argon2::password_hash::rand_core::OsRng);
-    // Deliberately using default (lower) params for dev speed.
-    // Production should tune memory/iterations.
-    Argon2::default()
+
+    let m_cost: u32 = std::env::var("ARGON2_M_COST")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(47104);
+    let t_cost: u32 = std::env::var("ARGON2_T_COST")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let p_cost: u32 = std::env::var("ARGON2_P_COST")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+
+    let params = Params::new(m_cost, t_cost, p_cost, None)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+
+    argon2
         .hash_password(password.as_bytes(), &salt)
         .map(|h| h.to_string())
         .map_err(|e| AppError::Internal(e.to_string()))

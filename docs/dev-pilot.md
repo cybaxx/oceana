@@ -6,7 +6,7 @@ Tracking what's been built, what works, and what's next.
 
 ## Current State: Phase 7 — Hardening
 
-**Status:** Full-stack app running in Docker. Backend API + SvelteKit frontend with Signal Protocol E2EE for chat, Ed25519 post signing, rate limiting, security headers, and comprehensive test coverage (104 backend + 86 frontend + integration suite).
+**Status:** Full-stack app running in Docker. Backend API + SvelteKit frontend with Signal Protocol E2EE for chat, Ed25519 post signing, rate limiting, security headers, and comprehensive test coverage (114 backend + 99 frontend + integration suite).
 
 ### What Exists
 
@@ -30,6 +30,11 @@ oceana/
 │   │   ├── 005_reactions.sql   # emoji reactions
 │   │   ├── 006_emoji_reactions.sql
 │   │   ├── 007_signal_keys.sql # Signal Protocol keys, prekeys, post signatures
+│   │   ├── 008_signing_key.sql # Ed25519 signing key
+│   │   ├── 009_avatar.sql      # avatar_url column
+│   │   ├── 010_refresh_tokens.sql # refresh token table
+│   │   ├── 011_post_updated_at.sql # post editing support
+│   │   ├── 012_conversation_name.sql # conversation naming
 │   │   └── 999_seed.sql        # test data
 │   └── src/
 │       ├── main.rs             # Server startup, migration, router, middleware
@@ -82,11 +87,15 @@ oceana/
 | `/api/v1/health` | GET | No | Done |
 | `/api/v1/auth/register` | POST | No | Done |
 | `/api/v1/auth/login` | POST | No | Done |
+| `/api/v1/auth/refresh` | POST | No | Done (token rotation) |
+| `/api/v1/auth/logout` | POST | Yes | Done (revokes all refresh tokens) |
 | `/api/v1/users/search` | GET | Yes | Done (ILIKE search by username) |
 | `/api/v1/users/:id` | GET | No | Done |
 | `/api/v1/profile` | PUT | Yes | Done |
 | `/api/v1/users/:id/follow` | POST | Yes | Done |
 | `/api/v1/users/:id/follow` | DELETE | Yes | Done |
+| `/api/v1/users/:id/followers` | GET | No | Done |
+| `/api/v1/users/:id/following` | GET | No | Done |
 | `/api/v1/posts` | POST | Yes | Done (accepts optional `signature`) |
 | `/api/v1/posts/:id` | GET | Yes | Done (returns PostWithAuthor with reactions, replies, signature) |
 | `/api/v1/posts/:id` | DELETE | Yes | Done |
@@ -103,7 +112,8 @@ oceana/
 | `/api/v1/keys/count` | GET | Yes | Done (remaining OPK count) |
 | `/api/v1/upload` | POST | Yes | Done (image upload) |
 | `/api/v1/uploads/:filename` | GET | No | Done (serve uploads) |
-| `/api/v1/ws` | WS | Token | Done (encrypted + plaintext messages) |
+| `/api/v1/ws/ticket` | POST | Yes | Done (one-time WS auth ticket) |
+| `/api/v1/ws` | WS | Ticket | Done (encrypted + plaintext messages) |
 
 ### Frontend Pages
 
@@ -125,7 +135,7 @@ oceana/
 | Web framework | Axum 0.7 | Async, tower middleware, best Rust web ecosystem |
 | Database driver | sqlx 0.8 | Compile-time SQL checking, async, direct PostgreSQL |
 | Password hashing | Argon2id | Current best practice, resistant to GPU/ASIC attacks |
-| Auth tokens | JWT (HS256) | Stateless, simple for dev; upgrade to Ed25519 for prod |
+| Auth tokens | JWT (HS256), 15-min expiry + 30-day refresh tokens | Stateless access tokens with server-side refresh token rotation |
 | Token storage | localStorage | Simple for MVP; move to httpOnly cookies for prod |
 | Frontend framework | SvelteKit + Tailwind CSS | Minimal runtime, fast iteration, SSR support |
 | Frontend theme | Dark ocean terminal | Monospace fonts, cyan glow, scanline overlay |
@@ -210,18 +220,21 @@ docker compose up --build -d
 ### Remaining
 
 **Quick wins:**
-- [ ] Follower/following list pages (counts work, but can't view actual lists)
-- [ ] Profile avatar/banner image upload UI
+- [x] Follower/following list endpoints
+- [x] Profile avatar upload (backend + migration)
 - [ ] Post editing (only delete supported)
 - [ ] Conversation naming for group chats
 
 **Security:**
-- [ ] Fix silent encryption fallback (sends plaintext when E2EE fails)
-- [ ] Remove plaintext message column or enforce E2EE-only
-- [ ] WS message content length validation and rate limiting
-- [ ] Group key rotation on membership changes
-- [ ] Token refresh/revocation
-- [ ] Password max length cap
+- [x] Fix silent encryption fallback (sends plaintext when E2EE fails)
+- [x] WS message content length validation and rate limiting
+- [x] Group key rotation on membership changes
+- [x] Token refresh/revocation (15-min access + 30-day refresh tokens)
+- [x] Password max length cap (128 chars)
+- [x] Configurable Argon2 parameters (OWASP defaults)
+- [x] Key bundle endpoint rate limiting (20/min)
+- [x] Email validation (proper format checking)
+- [x] Username charset restriction ([a-zA-Z0-9_-])
 
 **Infrastructure:**
 - [ ] CI pipeline

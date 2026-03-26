@@ -288,6 +288,29 @@ assert_eq "$DELETE_CHECK" "404" "deleted post returns 404"
 NOAUTH_DEL=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$BASE/posts/$P2" -H "Authorization: Bearer $ALICE_TOKEN")
 assert_eq "$NOAUTH_DEL" "404" "can't delete someone else's post"
 
+# ─── Post editing ─────────────────────────────────────────────────────────────
+section "Post editing"
+
+# Edit own post
+EDIT_RES=$(put_json "$ALICE_TOKEN" "/posts/$P1" '{"content":"Moon jellyfish have no brain — EDITED for accuracy 🪼"}')
+EDIT_CONTENT=$(echo "$EDIT_RES" | jq -r '.content')
+assert_eq "$EDIT_CONTENT" "Moon jellyfish have no brain — EDITED for accuracy 🪼" "edit updates content"
+
+EDIT_UPDATED=$(echo "$EDIT_RES" | jq -r '.updated_at')
+assert_not_empty "$EDIT_UPDATED" "edit sets updated_at"
+
+# Can't edit someone else's post
+NOAUTH_EDIT=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$BASE/posts/$P2" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $ALICE_TOKEN" \
+  -d '{"content":"hacked"}')
+assert_eq "$NOAUTH_EDIT" "404" "can't edit someone else's post"
+
+# Validation: empty content
+EMPTY_EDIT=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$BASE/posts/$P1" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $ALICE_TOKEN" \
+  -d '{"content":""}')
+assert_eq "$EMPTY_EDIT" "400" "rejects empty edit content"
+
 # ─── Feed ─────────────────────────────────────────────────────────────────────
 section "Feed"
 
@@ -315,12 +338,31 @@ section "Chat"
 CONV1=$(post_json "$ALICE_TOKEN" "/chats" "{\"participant_ids\":[\"$BOB_ID\"]}" | jq -r .id)
 assert_not_empty "$CONV1" "1:1 conversation created"
 
-CONV2=$(post_json "$ALICE_TOKEN" "/chats" "{\"participant_ids\":[\"$BOB_ID\",\"$CORAL_ID\",\"$DEPTH_ID\"]}" | jq -r .id)
-assert_not_empty "$CONV2" "group conversation created"
+# Create named conversation
+CONV2_RES=$(post_json "$ALICE_TOKEN" "/chats" "{\"participant_ids\":[\"$BOB_ID\",\"$CORAL_ID\",\"$DEPTH_ID\"],\"name\":\"Ocean Crew\"}")
+CONV2=$(echo "$CONV2_RES" | jq -r .id)
+CONV2_NAME=$(echo "$CONV2_RES" | jq -r .name)
+assert_not_empty "$CONV2" "named group conversation created"
+assert_eq "$CONV2_NAME" "Ocean Crew" "conversation has name"
 
-# List conversations
-CONV_COUNT=$(get_auth "$ALICE_TOKEN" "/chats" | jq 'length')
+# List conversations includes name
+CONV_LIST=$(get_auth "$ALICE_TOKEN" "/chats")
+CONV_COUNT=$(echo "$CONV_LIST" | jq 'length')
 assert_gt "$CONV_COUNT" "0" "alice has conversations"
+
+LIST_NAME=$(echo "$CONV_LIST" | jq -r --arg id "$CONV2" '.[] | select(.id == $id) | .name')
+assert_eq "$LIST_NAME" "Ocean Crew" "conversation name in listing"
+
+# Rename conversation
+RENAME_RES=$(put_json "$ALICE_TOKEN" "/chats/$CONV2" '{"name":"Deep Ocean Crew"}')
+RENAMED=$(echo "$RENAME_RES" | jq -r .name)
+assert_eq "$RENAMED" "Deep Ocean Crew" "conversation renamed"
+
+# Non-member can't rename
+RENAME_NOAUTH=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$BASE/chats/$CONV1" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $CORAL_TOKEN" \
+  -d '{"name":"hacked"}')
+assert_eq "$RENAME_NOAUTH" "404" "non-member can't rename conversation"
 
 # Get conversation members
 MEMBERS=$(get_auth "$ALICE_TOKEN" "/chats/$CONV2/members" | jq 'length')

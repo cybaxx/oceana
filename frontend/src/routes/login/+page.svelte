@@ -25,7 +25,7 @@
 </script>
 
 <div class="mx-auto mt-16 max-w-sm">
-	<div class="rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-6">
+	<div class="login-card rounded-lg border border-[var(--terminal-border)] bg-[var(--ocean-900)] p-6">
 		<div class="mb-6">
 			<div class="mb-1 text-xs text-[var(--terminal-dim)]">~/auth</div>
 			<h1 class="text-lg font-bold text-[var(--ocean-300)]">login</h1>

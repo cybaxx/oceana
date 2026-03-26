@@ -29,7 +29,7 @@ pub fn router() -> Router<AppState> {
         .route("/profile", put(update_profile))
         // Posts
         .route("/posts", post(create_post))
-        .route("/posts/:id", get(get_post).delete(delete_post))
+        .route("/posts/:id", get(get_post).put(update_post).delete(delete_post))
         .route("/posts/:id/react", post(react_to_post).delete(unreact_to_post))
         .route("/posts/:id/reactions", get(get_reactions))
         .route("/posts/:id/replies", get(get_replies))
@@ -37,6 +37,7 @@ pub fn router() -> Router<AppState> {
         .route("/feed", get(get_feed))
         // Chat
         .route("/chats", post(create_conversation).get(list_conversations))
+        .route("/chats/:id", put(update_conversation))
         .route("/chats/:id/messages", get(get_messages))
         // Signal keys
         .route("/keys/bundle", put(upload_key_bundle))
@@ -66,9 +67,7 @@ async fn register(
 ) -> Result<Json<AuthResponse>, AppError> {
     validate_username(&body.username).map_err(AppError::BadRequest)?;
     validate_password(&body.password).map_err(AppError::BadRequest)?;
-    if !body.email.contains('@') || !body.email.contains('.') {
-        return Err(AppError::BadRequest("Invalid email format".into()));
-    }
+    validate_email(&body.email).map_err(AppError::BadRequest)?;
 
     let password_hash = auth::hash_password(&body.password)?;
 
@@ -302,7 +301,7 @@ async fn get_post(
 ) -> Result<Json<PostWithAuthor>, AppError> {
     let row = sqlx::query_as::<_, PostWithAuthorRow>(
         r#"
-        SELECT p.id, p.author_id, p.content, p.parent_id, p.signature, p.created_at,
+        SELECT p.id, p.author_id, p.content, p.parent_id, p.signature, p.created_at, p.updated_at,
                u.username AS author_username, u.display_name AS author_display_name,
                u.is_bot AS author_is_bot,
                u.signing_key AS author_signing_key,
@@ -331,6 +330,7 @@ async fn get_post(
             parent_id: row.parent_id,
             signature: row.signature,
             created_at: row.created_at,
+            updated_at: row.updated_at,
         },
         author_username: row.author_username,
         author_display_name: row.author_display_name,
@@ -357,6 +357,28 @@ async fn delete_post(
         return Err(AppError::NotFound("Post not found or not owned by you".into()));
     }
     Ok(Json(serde_json::json!({ "status": "deleted" })))
+}
+
+async fn update_post(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdatePostRequest>,
+) -> Result<Json<Post>, AppError> {
+    if body.content.is_empty() || body.content.len() > 10_000 {
+        return Err(AppError::BadRequest("Post content must be 1-10000 characters".into()));
+    }
+    let post = sqlx::query_as::<_, Post>(
+        "UPDATE posts SET content = $1, signature = $2, updated_at = NOW() WHERE id = $3 AND author_id = $4 RETURNING *"
+    )
+    .bind(&body.content)
+    .bind(&body.signature)
+    .bind(id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Post not found or not owned by you".into()))?;
+    Ok(Json(post))
 }
 
 // --- Reactions ---
@@ -429,7 +451,7 @@ async fn get_replies(
 
     let rows = sqlx::query_as::<_, PostWithAuthorRow>(
         r#"
-        SELECT p.id, p.author_id, p.content, p.parent_id, p.signature, p.created_at,
+        SELECT p.id, p.author_id, p.content, p.parent_id, p.signature, p.created_at, p.updated_at,
                u.username AS author_username, u.display_name AS author_display_name,
                u.is_bot AS author_is_bot,
                u.signing_key AS author_signing_key,
@@ -463,6 +485,7 @@ async fn get_replies(
             parent_id: r.parent_id,
             signature: r.signature,
             created_at: r.created_at,
+            updated_at: r.updated_at,
         },
         author_username: r.author_username,
         author_display_name: r.author_display_name,
@@ -498,7 +521,7 @@ async fn get_feed(
 
     let rows = sqlx::query_as::<_, PostWithAuthorRow>(
         r#"
-        SELECT p.id, p.author_id, p.content, p.parent_id, p.signature, p.created_at,
+        SELECT p.id, p.author_id, p.content, p.parent_id, p.signature, p.created_at, p.updated_at,
                u.username AS author_username, u.display_name AS author_display_name,
                u.is_bot AS author_is_bot,
                u.signing_key AS author_signing_key,
@@ -533,6 +556,7 @@ async fn get_feed(
             parent_id: r.parent_id,
             signature: r.signature,
             created_at: r.created_at,
+            updated_at: r.updated_at,
         },
         author_username: r.author_username,
         author_display_name: r.author_display_name,
@@ -573,8 +597,9 @@ async fn create_conversation(
     }
 
     let conv = sqlx::query_as::<_, Conversation>(
-        "INSERT INTO conversations DEFAULT VALUES RETURNING *"
+        "INSERT INTO conversations (name) VALUES ($1) RETURNING *"
     )
+    .bind(&body.name)
     .fetch_one(&state.db)
     .await?;
 
@@ -605,7 +630,7 @@ async fn list_conversations(
 ) -> Result<Json<Vec<ConversationWithLastMessage>>, AppError> {
     let convs = sqlx::query_as::<_, ConversationWithLastMessage>(
         r#"
-        SELECT c.id, c.created_at,
+        SELECT c.id, c.created_at, c.name,
                NULL::text AS last_message_text,
                m.created_at AS last_message_at,
                m.sender_id AS last_message_sender_id
@@ -624,6 +649,42 @@ async fn list_conversations(
     .await?;
 
     Ok(Json(convs))
+}
+
+async fn update_conversation(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdateConversationRequest>,
+) -> Result<Json<Conversation>, AppError> {
+    // Verify user is a member
+    let is_member = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2)"
+    )
+    .bind(id)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    if !is_member {
+        return Err(AppError::NotFound("Conversation not found".into()));
+    }
+
+    if let Some(ref name) = body.name {
+        if name.len() > 128 {
+            return Err(AppError::BadRequest("Conversation name must be at most 128 characters".into()));
+        }
+    }
+
+    let conv = sqlx::query_as::<_, Conversation>(
+        "UPDATE conversations SET name = $1 WHERE id = $2 RETURNING *"
+    )
+    .bind(&body.name)
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(Json(conv))
 }
 
 async fn get_messages(
@@ -965,6 +1026,38 @@ fn validate_username(username: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_email(email: &str) -> Result<(), String> {
+    let email = email.trim();
+    if email.len() > 254 {
+        return Err("Email is too long".into());
+    }
+    let parts: Vec<&str> = email.splitn(2, '@').collect();
+    if parts.len() != 2 {
+        return Err("Invalid email format".into());
+    }
+    let (local, domain) = (parts[0], parts[1]);
+    if local.is_empty() || local.len() > 64 {
+        return Err("Invalid email format".into());
+    }
+    if domain.len() < 3 || !domain.contains('.') {
+        return Err("Invalid email format".into());
+    }
+    let domain_parts: Vec<&str> = domain.split('.').collect();
+    if domain_parts.iter().any(|p| p.is_empty()) {
+        return Err("Invalid email format".into());
+    }
+    if domain_parts.last().map_or(true, |tld| tld.len() < 2) {
+        return Err("Invalid email format".into());
+    }
+    if !local.chars().all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c)) {
+        return Err("Invalid email format".into());
+    }
+    if !domain.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+        return Err("Invalid email format".into());
+    }
+    Ok(())
+}
+
 fn validate_password(password: &str) -> Result<(), String> {
     if password.len() < 8 {
         return Err("Password must be at least 8 characters".into());
@@ -1030,6 +1123,7 @@ struct PostWithAuthorRow {
     parent_id: Option<Uuid>,
     signature: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: Option<chrono::DateTime<chrono::Utc>>,
     author_username: String,
     author_display_name: Option<String>,
     author_is_bot: bool,
@@ -1438,6 +1532,45 @@ mod tests {
     fn username_accepts_boundary_lengths() {
         assert!(validate_username("abc").is_ok()); // min 3
         assert!(validate_username(&"a".repeat(32)).is_ok()); // max 32
+    }
+
+    // --- validate_email ---
+
+    #[test]
+    fn email_accepts_valid() {
+        assert!(validate_email("user@example.com").is_ok());
+        assert!(validate_email("a+b@sub.domain.org").is_ok());
+        assert!(validate_email("test.user@mail.co").is_ok());
+    }
+
+    #[test]
+    fn email_rejects_missing_at() {
+        assert!(validate_email("userexample.com").is_err());
+    }
+
+    #[test]
+    fn email_rejects_missing_dot_in_domain() {
+        assert!(validate_email("user@localhost").is_err());
+    }
+
+    #[test]
+    fn email_rejects_empty_local() {
+        assert!(validate_email("@example.com").is_err());
+    }
+
+    #[test]
+    fn email_rejects_empty_tld() {
+        assert!(validate_email("user@example.").is_err());
+    }
+
+    #[test]
+    fn email_rejects_short_tld() {
+        assert!(validate_email("user@example.a").is_err());
+    }
+
+    #[test]
+    fn email_rejects_bare_at_dot() {
+        assert!(validate_email("@.").is_err());
     }
 
     // --- validate_password ---
